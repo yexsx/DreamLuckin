@@ -1,0 +1,35 @@
+{
+  "config_name": "梦瑞幸配置文件",
+  "db_connection": {
+    "db_path": "D:\\programmer\\soul\\DreamLuckin\\Reference\\message_0_decrypted.db",
+    "self_identifier": "wxid_ohulg00g2z9322_bcf3"
+  },
+  "stat_mode": {
+    "mode_type": "self_to_target",
+    "target_contact": "对方昵称_小明"
+  },
+  "time_config": {
+    "stat_dimension": "week",
+    "time_range_type": "recent",
+    "recent_num": 4,
+    "custom_start_date": "2025-01-01",
+    "custom_end_date": "2025-11-30"
+  },
+  "pet_phrase_config": {
+    "pet_phrases": ["还真是", "确实", "笑死", "真的假的", "无语"],
+    "case_sensitive": false,
+    "whole_word_match": false,
+    "ignore_emoji_space": true
+  },
+  "filter_config": {
+    "filter_group_chat": true,
+    "filter_msg_types": ["voice", "image", "video", "file"],
+    "min_phrase_length": 1
+  },
+  "output_config": {
+    "output_path": "/Users/xxx/Desktop/统计结果",
+    "output_format": "csv",
+    "show_detail_distribution": true,
+    "sort_by": "count_desc"
+  }
+}
