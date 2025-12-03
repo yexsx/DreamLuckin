@@ -3,7 +3,7 @@ from typing import Dict
 import os
 # 导入结构化配置类
 from configs.config_models import (
-    AppConfig, StatModeConfig, TimeConfig,
+    DBConfig, AppConfig, StatModeConfig, TimeConfig,
     PetPhraseConfig, FilterConfig, OutputConfig
 )
 
@@ -17,24 +17,54 @@ class ConfigParser:
     @staticmethod
     def parse(config_dict: Dict) -> AppConfig:
         """主解析方法：将原始JSON字典转换为结构化AppConfig"""
+        db_config = ConfigParser._parse_db_config(config_dict.get("db_config", {}))
         stat_mode = ConfigParser._parse_stat_mode(config_dict.get("stat_mode", {}))
         time_config = ConfigParser._parse_time_config(config_dict.get("time_config", {}))
         pet_phrase = ConfigParser._parse_pet_phrase(config_dict.get("pet_phrase_config", {}))
         filter_cfg = ConfigParser._parse_filter(config_dict.get("filter_config", {}))
         output_cfg = ConfigParser._parse_output(config_dict.get("output_config", {}))
 
-        self_id = config_dict.get("db_connection", {}).get("self_identifier")
-        if not self_id:
-            raise ValueError("配置缺少 self_identifier")
-
         return AppConfig(
+            db_config=db_config,
             stat_mode=stat_mode,
             time_config=time_config,
             pet_phrase_config=pet_phrase,
             filter_config=filter_cfg,
-            output_config=output_cfg,
-            self_identifier=self_id
+            output_config=output_cfg
         )
+
+
+    @staticmethod
+    def _parse_db_config(db_config_dict: Dict) -> DBConfig:
+        """校验数据库配置合法性（含路径、文件存在性、并发数完整校验）"""
+        # 1. 校验数据库路径（必填+字符串类型）
+        db_path = db_config_dict.get("db_path")
+        if not db_path:
+            raise ValueError("db_config.db_path 为必填项，不能为空")
+        if not isinstance(db_path, str):
+            raise TypeError("db_config.db_path 必须是字符串类型（数据库文件路径）")
+
+        # 2. 校验数据库文件是否存在
+        if not os.path.exists(db_path):
+            raise FileNotFoundError(f"数据库文件不存在：{db_path}（请检查路径是否正确）")
+
+        # 3. 校验 max_concurrency（类型+取值范围）
+        max_concurrency = db_config_dict.get("max_concurrency", 10)  # 默认值10
+        # 3.1 校验类型（必须是整数）
+        if not isinstance(max_concurrency, int):
+            raise TypeError("db_config.max_concurrency 必须是整数类型")
+        # 3.2 校验取值范围（必须大于0，且不超过20）
+        if max_concurrency <= 0:
+            raise ValueError("db_config.max_concurrency 必须大于0")
+        if max_concurrency > 20:
+            raise ValueError("db_config.max_concurrency 最大不能超过20（避免数据库压力过大）")
+
+        return DBConfig(
+            db_path=db_path,
+            max_concurrency=max_concurrency
+        )
+
+
 
     @staticmethod
     def _parse_stat_mode(stat_mode_dict: Dict) -> StatModeConfig:
@@ -54,81 +84,55 @@ class ConfigParser:
             target_contact=target_contact.strip() if target_contact else None
         )
 
+
+
+
     @staticmethod
     def _parse_time_config(time_config_dict: Dict) -> TimeConfig:
         """解析并校验时间配置，生成SQL可用条件"""
-        # 校验维度
+        # 1. 校验维度
         stat_dimension = time_config_dict.get("stat_dimension")
         valid_dimensions = ["day", "week", "month"]
         if not stat_dimension or stat_dimension not in valid_dimensions:
             raise ValueError(f"time_config.stat_dimension 必须是 {valid_dimensions} 中的一种")
 
-        # 校验时间范围类型
+        # 2. 校验时间范围类型
         time_range_type = time_config_dict.get("time_range_type")
         valid_range_types = ["recent", "custom"]
         if not time_range_type or time_range_type not in valid_range_types:
             raise ValueError(f"time_config.time_range_type 必须是 {valid_range_types} 中的一种")
 
-        # 初始化时间配置
-        time_config = TimeConfig(
-            stat_dimension=stat_dimension,
-            time_range_type=time_range_type,
-            recent_num=time_config_dict.get("recent_num"),
-            custom_start_date=time_config_dict.get("custom_start_date"),
-            custom_end_date=time_config_dict.get("custom_end_date")
-        )
-
-        # 1. 设置SQL日期格式化字符串（用于GROUP BY分组）
-        dimension_format = {
-            "day": "%Y-%m-%d",
-            "week": "%Y-W%W", # 格式：2025 - W45（2025年第45周）
-            "month": "%Y-%m"
-        }
-        time_config.sql_date_format = dimension_format[stat_dimension]
-
-        # 2. 生成SQL时间查询条件（BETWEEN 起始时间戳 AND 结束时间戳）
-        time_config.sql_time_condition = ConfigParser._generate_sql_time_condition(time_config)
-
-        return time_config
-
-    @staticmethod
-    def _generate_sql_time_condition(time_config: TimeConfig) -> str:
-        """生成SQL中的时间查询条件（假设create_time是unix时间戳）"""
-        now = datetime.datetime.now()
-
-        if time_config.time_range_type == "recent":
-            # 最近N个时间单位
-            recent_num = time_config.recent_num or 7
+        # 3. 校验recent场景参数
+        recent_num = time_config_dict.get("recent_num")
+        if time_range_type == "recent":
+            if recent_num is None:
+                recent_num = 7  # 默认最近7个单位
             if not isinstance(recent_num, int) or recent_num < 1:
-                raise ValueError("recent_num 必须是大于等于1的整数")
+                raise ValueError("recent_num 必须是≥1的整数")
 
-            # 计算起始时间
-            if time_config.stat_dimension == "day":
-                start_date = now - datetime.timedelta(days=recent_num)
-            elif time_config.stat_dimension == "week":
-                start_date = now - datetime.timedelta(weeks=recent_num)
-            else:  # month（简化：按30天算，精确可改用dateutil.relativedelta）
-                start_date = now - datetime.timedelta(days=recent_num * 30)
-
-            end_date = now
-        else:  # custom
-            # 自定义日期范围
-            start_date_str = time_config.custom_start_date
-            end_date_str = time_config.custom_end_date
-            if not start_date_str or not end_date_str:
+        # 4. 校验custom场景参数
+        custom_start_date = time_config_dict.get("custom_start_date")
+        custom_end_date = time_config_dict.get("custom_end_date")
+        if time_range_type == "custom":
+            if not custom_start_date or not custom_end_date:
                 raise ValueError("time_range_type=custom 时，必须填写 custom_start_date 和 custom_end_date")
+            # 校验日期格式
             try:
-                start_date = datetime.datetime.strptime(start_date_str, "%Y-%m-%d")
-                end_date = datetime.datetime.strptime(end_date_str, "%Y-%m-%d")
-                if start_date > end_date:
+                datetime.datetime.strptime(custom_start_date, "%Y-%m-%d")
+                datetime.datetime.strptime(custom_end_date, "%Y-%m-%d")
+                if custom_start_date > custom_end_date:
                     raise ValueError("custom_start_date 不能晚于 custom_end_date")
             except ValueError as e:
                 raise ValueError(f"日期格式错误（需YYYY-MM-DD）：{e}")
 
-        # 转换为unix时间戳（SQLite中可直接对比）
-        start_timestamp = int(start_date.timestamp())
-        end_timestamp = int(end_date.timestamp())
-        return f"create_time BETWEEN {start_timestamp} AND {end_timestamp}"
+        # 初始化时间配置
+        return TimeConfig(
+            stat_dimension=stat_dimension,
+            time_range_type=time_range_type,
+            recent_num=recent_num,
+            custom_start_date=custom_start_date,
+            custom_end_date=custom_end_date
+        )
 
     @staticmethod
     def _parse_pet_phrase(pet_phrase_dict: Dict) -> PetPhraseConfig:

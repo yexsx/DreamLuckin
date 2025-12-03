@@ -1,38 +1,18 @@
-import concurrent.futures
-from services.lucky_chat_db_service import LuckyChatDBService
-
-
-def thread_task(task_name: str, sql: str) -> None:
-    """单个线程任务（仅执行基础查询，验证多线程连接）"""
-    conn, cursor = None, None
-    try:
-        print(f"🚀 线程 {task_name} 启动，执行查询...")
-        # 每个线程创建独立连接
-        conn, cursor = LuckyChatDBService.create_connection()
-        # 执行查询（示例：查询消息表前5条数据）
-        result = LuckyChatDBService.execute_query(cursor, sql)
-        print(f"✅ 线程 {task_name} 执行成功，查询结果条数：{len(result)}")
-    except Exception as e:
-        print(f"❌ 线程 {task_name} 执行失败：{e}")
-    finally:
-        # 关闭当前线程连接
-        LuckyChatDBService.close_connection(conn)
 
 
 def main():
-    # 1. 初始化配置
-    LuckyChatDBService.init_config(config_path="Reference/config.json")
 
-    # 2. 定义2个简单查询任务（多线程并行执行）
-    tasks = [
-        ("任务1", "select message_content from Msg_c7d86c7f53baf9b37e5df2e0dd0b0305 where local_type = 1"),  # 查前5条消息
-        ("任务2", "select message_content from Msg_c7d86c7f53baf9b37e5df2e0dd0b0305 where local_type = 1")  # 查消息总数
-    ]
-
-    # 3. 多线程执行（2个线程）
-    with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
-        for task_name, sql in tasks:
-            executor.submit(thread_task, task_name, sql)
+    print("Lucky Luckin")
+    # 1.加载原始配置文件（config.json）→
+    # 2.调用ConfigParser校验配置 → 生成合法的AppConfig对象（含所有校验后的配置）→
+    # 3.初始化DB连接（全局单连接，SQLite单连接足够，避免多连接竞争）→
+    # 4.查询sqlite_master获取所有Msg_开头的聊天表名 →
+    # 5.初始化策略工厂 → 根据AppConfig中的mode_type创建对应策略（如SelfAllStrategy）→
+    # 6.逐个表执行核心流程（单线程 / 多线程可选）：
+        # a.调用SQLBuilder拼接完整SQL（时间条件 + 文本过滤 + 口头禅条件）→
+        # b.执行SQL查询（单表单查询，获取该表的符合条件的消息）→
+        # c.文本预处理（TextPreprocessor）→ 口头禅统计（PetPhraseMatcher）→
+    # 7.汇总所有表的统计结果 → 后续输出（CSV / JSON）
 
 
 if __name__ == "__main__":

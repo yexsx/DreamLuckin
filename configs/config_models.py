@@ -3,6 +3,15 @@ from typing import Optional, List, Literal
 
 
 # ------------------------------
+# 数据库配置
+# ------------------------------
+@dataclass
+class DBConfig:
+    db_path: str  # 数据库文件路径（如 "WeChat.db"）
+    max_concurrency: int = 10  # 协程最大并发数
+
+
+# ------------------------------
 # 统计模式配置
 # ------------------------------
 @dataclass
@@ -21,9 +30,6 @@ class TimeConfig:
     recent_num: Optional[int] = None
     custom_start_date: Optional[str] = None
     custom_end_date: Optional[str] = None
-    # 解析后的值（供SQL查询用）
-    sql_date_format: str = ""  # 日期格式化字符串（如 '%Y-%m-%d' 对应day维度）
-    sql_time_condition: str = ""  # 时间查询条件（如 "create_time BETWEEN xxx AND xxx"）
 
 
 # ------------------------------
@@ -63,9 +69,9 @@ class OutputConfig:
 # ------------------------------
 @dataclass
 class AppConfig:
+    db_config: DBConfig
     stat_mode: StatModeConfig
     time_config: TimeConfig
     pet_phrase_config: PetPhraseConfig
     filter_config: FilterConfig
     output_config: OutputConfig
-    self_identifier: str  # 从db_connection提取

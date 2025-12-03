@@ -2,7 +2,7 @@
   "config_name": "梦瑞幸配置文件",
   "db_connection": {
     "db_path": "D:\\programmer\\soul\\DreamLuckin\\Reference\\message_0_decrypted.db",
-    "self_identifier": "wxid_ohulg00g2z9322_bcf3"
+    "max_concurrency": 10
   },
   "stat_mode": {
     "mode_type": "self_to_target",
