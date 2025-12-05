@@ -1,7 +1,8 @@
 {
   "config_name": "梦瑞幸配置文件",
   "db_connection": {
-    "db_path": "D:\\programmer\\soul\\DreamLuckin\\Reference\\message_0_decrypted.db",
+    "chat_db_path": "D:\\programmer\\soul\\DreamLuckin\\Reference\\contact_decrypted.db",
+    "contact_db_path": "D:\\programmer\\soul\\DreamLuckin\\Reference\\message_0_decrypted.db",
     "max_concurrency": 10
   },
   "stat_mode": {
@@ -17,19 +18,13 @@
   },
   "pet_phrase_config": {
     "pet_phrases": ["还真是", "确实", "笑死", "真的假的", "无语"],
-    "case_sensitive": false,
-    "whole_word_match": false,
-    "ignore_emoji_space": true
+    "whole_word_match": false
   },
   "filter_config": {
-    "filter_group_chat": true,
-    "filter_msg_types": ["voice", "image", "video", "file"],
-    "min_phrase_length": 1
+    "filter_group_chat": true
   },
   "output_config": {
-    "output_path": "/Users/xxx/Desktop/统计结果",
-    "output_format": "csv",
-    "show_detail_distribution": true,
-    "sort_by": "count_desc"
+    "display_dimension": "month",
+    "export_path": "Reference/output/"
   }
 }

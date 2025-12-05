@@ -7,7 +7,8 @@ from typing import Optional, List, Literal
 # ------------------------------
 @dataclass
 class DBConfig:
-    db_path: str  # 数据库文件路径（如 "WeChat.db"）
+    chat_db_path: str  # 数据库文件路径（如 "Message.db"）
+    contact_db_path: str  # 数据库文件路径（如 "Contact.db"）
     max_concurrency: int = 10  # 协程最大并发数
 
 
@@ -49,8 +50,8 @@ class PetPhraseConfig:
 @dataclass
 class FilterConfig:
     filter_group_chat: bool = True  # 是否过滤群聊
-    filter_msg_types: List[Literal["voice", "image", "video", "file", "location", "link"]] = None  # 过滤的消息类型
-    min_phrase_length: int = 1  # 口头禅最小长度
+    # filter_msg_types: List[Literal["voice", "image", "video", "file", "location", "link"]] = None  # 过滤的消息类型
+    # min_phrase_length: int = 1  # 口头禅最小长度
 
 
 # ------------------------------
@@ -58,10 +59,8 @@ class FilterConfig:
 # ------------------------------
 @dataclass
 class OutputConfig:
-    output_path: str  # 输出路径
-    output_format: Literal["json", "csv", "txt"] = "json"  # 输出格式
-    show_detail_distribution: bool = True  # 是否显示维度明细
-    sort_by: Literal["count_desc", "phrase_asc"] = "count_desc"  # 排序方式
+    display_dimension: str  # 统计/可视化维度：year/month/day
+    export_path: str        # 输出文件根路径
 
 
 # ------------------------------

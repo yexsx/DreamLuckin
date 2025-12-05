@@ -1,98 +1,98 @@
 from abc import ABC, abstractmethod
-from typing import Dict
-from configs.parser import AppConfig
+from typing import Dict, List, TypeAlias
+
+# 类型别名：统一核心记录结构（所有策略复用）
+CoreRecord: TypeAlias = Dict[str, int | str]
+# 类型别名：统一表处理结果结构（单表/多表返回类型一致）
+ProcessResult: TypeAlias = Dict[str, List[CoreRecord]]
+# 类型别名：统一聚合统计结果结构
+AggregateResult: TypeAlias = Dict[str, any]
 
 
-# ------------------------------
-# 策略接口（统一所有统计模式的方法）
-# ------------------------------
 class StatStrategy(ABC):
-    """统计策略接口：所有模式必须实现该接口"""
+    """统计策略抽象接口类（所有策略的基类）"""
+
+    def __init__(
+        self,
+        chat_db_service,  # 聊天记录DB服务实例（LuckyChatDBService）
+        contact_db_service,  # 联系人DB服务实例（ContactDBService）
+        app_config  # 全局配置实例（AppConfig）
+    ):
+        self.chat_db_service = chat_db_service
+        self.contact_db_service = contact_db_service
+        self.app_config = app_config
+        # 缓存：映射关系（表名→联系人信息）
+        self.mapping_cache: Dict[str, Dict[str, str]] = {}
+        # 缓存：表处理结果（后续步骤复用）
+        self.process_result: ProcessResult = {}
+        # 缓存：带上下文的核心记录
+        self.context_result: Dict[str, List[Dict[str, any]]] = {}
 
     @abstractmethod
-    def get_sql_filter(self, app_config: AppConfig) -> str:
-        """获取SQL查询的过滤条件（不同模式过滤条件不同）"""
+    def _associate_mapping(self) -> None:
+        """步骤1：提前获取映射关系（单表/全量），结果存入mapping_cache"""
         pass
 
     @abstractmethod
-    def execute(self, app_config: AppConfig, db_service) -> Dict:
-        """执行统计逻辑（返回统计结果）"""
+    def _get_pending_tables(self) -> List[str]:
+        """步骤2：获取待处理的表列表
+        返回：
+            List[str]：待处理的Msg表名列表（单表策略返回长度为1的列表）
+        """
         pass
 
+    @abstractmethod
+    def _process_tables(self, pending_tables: List[str]) -> ProcessResult:
+        """步骤3：处理表数据（同步/协程）
+        参数：
+            pending_tables：_get_pending_tables返回的待处理表列表
+        返回：
+            ProcessResult：{表名: 核心记录列表}
+        """
+        pass
 
-# ------------------------------
-# 三种具体策略实现（每种模式一个类）
-# ------------------------------
-class SelfAllStrategy(StatStrategy):
-    """策略1：自己所有聊天的口头禅统计"""
+    @abstractmethod
+    def _backtrack_context(self) -> None:
+        """步骤4：回溯核心记录的上两条上下文
+        处理self.process_result，补充上下文后存入self.context_result
+        """
+        pass
 
-    def get_sql_filter(self, app_config: AppConfig) -> str:
-        # 过滤条件：自己发出的消息 + 时间范围
-        self_id = app_config.self_identifier
-        time_condition = app_config.time_config.sql_time_condition
-        return f"talker = '{self_id}' AND {time_condition}"
+    @abstractmethod
+    def _aggregate_stat(self) -> AggregateResult:
+        """步骤5：按维度聚合统计
+        返回：
+            AggregateResult：聚合后的统计结果（含维度概览、明细等）
+        """
+        pass
 
-    def execute(self, app_config: AppConfig, db_service) -> Dict:
-        """执行统计（仅搭骨架，后续填具体逻辑）"""
-        print(f"📊 执行【自己所有聊天】统计模式")
-        # 后续步骤：
-        # 1. 获取SQL过滤条件
-        sql_filter = self.get_sql_filter(app_config)
-        # 2. 调用db_service执行查询
-        # 3. 统计口头禅出现次数
-        # 4. 返回结果
-        return {"mode": "self_all", "filter": sql_filter, "result": {}}
-
-
-class SelfToTargetStrategy(StatStrategy):
-    """策略2：自己对某个人的口头禅统计"""
-
-    def get_sql_filter(self, app_config: AppConfig) -> str:
-        # 过滤条件：自己发出的消息 + 接收方是target + 时间范围
-        self_id = app_config.self_identifier
-        target = app_config.stat_mode.target_contact
-        time_condition = app_config.time_config.sql_time_condition
-        return f"talker = '{self_id}' AND receiver = '{target}' AND {time_condition}"  # 假设receiver是接收方字段，需按实际表结构调整
-
-    def execute(self, app_config: AppConfig, db_service) -> Dict:
-        print(f"📊 执行【自己对{app_config.stat_mode.target_contact}】统计模式")
-        sql_filter = self.get_sql_filter(app_config)
-        # 后续填统计逻辑
-        return {"mode": "self_to_target", "target": app_config.stat_mode.target_contact, "filter": sql_filter,
-                "result": {}}
-
-
-class TargetToSelfStrategy(StatStrategy):
-    """策略3：某个人对自己的口头禅统计"""
-
-    def get_sql_filter(self, app_config: AppConfig) -> str:
-        # 过滤条件：发送方是target + 接收方是自己 + 时间范围
-        self_id = app_config.self_identifier
-        target = app_config.stat_mode.target_contact
-        time_condition = app_config.time_config.sql_time_condition
-        return f"talker = '{target}' AND receiver = '{self_id}' AND {time_condition}"  # 需按实际表结构调整字段名
-
-    def execute(self, app_config: AppConfig, db_service) -> Dict:
-        print(f"📊 执行【{app_config.stat_mode.target_contact}对自己】统计模式")
-        sql_filter = self.get_sql_filter(app_config)
-        # 后续填统计逻辑
-        return {"mode": "target_to_self", "target": app_config.stat_mode.target_contact, "filter": sql_filter,
-                "result": {}}
+    def run(self) -> AggregateResult:
+        """策略执行入口（统一串联所有步骤，无需重写）"""
+        # 步骤1：获取映射关系
+        self._associate_mapping()
+        # 步骤2：获取待处理表
+        pending_tables = self._get_pending_tables()
+        # 步骤3：处理表数据
+        self.process_result = self._process_tables(pending_tables)
+        # 步骤4：回溯上下文
+        self._backtrack_context()
+        # 步骤5：聚合统计
+        return self._aggregate_stat()
 
 
 # ------------------------------
 # 策略工厂（根据mode_type创建对应策略实例）
 # ------------------------------
-class StatStrategyFactory:
-    """策略工厂：隐藏策略创建细节，统一入口"""
-
-    @staticmethod
-    def create_strategy(mode_type: str) -> StatStrategy:
-        strategy_map = {
-            "self_all": SelfAllStrategy(),
-            "self_to_target": SelfToTargetStrategy(),
-            "target_to_self": TargetToSelfStrategy()
-        }
-        if mode_type not in strategy_map:
-            raise ValueError(f"不支持的统计模式：{mode_type}")
-        return strategy_map[mode_type]
+# class StatStrategyFactory:
+#     """策略工厂：隐藏策略创建细节，统一入口"""
+#
+#     @staticmethod
+#     def create_strategy(mode_type: str) -> StatStrategy:
+#         strategy_map = {
+#             "self_all": SelfAllStrategy(),
+#             "self_to_target": SelfToTargetStrategy(),
+#             "target_to_self": TargetToSelfStrategy()
+#         }
+#         if mode_type not in strategy_map:
+#             raise ValueError(f"不支持的统计模式：{mode_type}")
+#         return strategy_map[mode_type]

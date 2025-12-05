@@ -22,7 +22,7 @@ class ConfigParser:
         time_config = ConfigParser._parse_time_config(config_dict.get("time_config", {}))
         pet_phrase = ConfigParser._parse_pet_phrase(config_dict.get("pet_phrase_config", {}))
         filter_cfg = ConfigParser._parse_filter(config_dict.get("filter_config", {}))
-        output_cfg = ConfigParser._parse_output(config_dict.get("output_config", {}))
+        output_cfg = ConfigParser._parse_output_config(config_dict.get("output_config", {}))
 
         return AppConfig(
             db_config=db_config,
@@ -37,18 +37,31 @@ class ConfigParser:
     @staticmethod
     def _parse_db_config(db_config_dict: Dict) -> DBConfig:
         """校验数据库配置合法性（含路径、文件存在性、并发数完整校验）"""
-        # 1. 校验数据库路径（必填+字符串类型）
-        db_path = db_config_dict.get("db_path")
-        if not db_path:
-            raise ValueError("db_config.db_path 为必填项，不能为空")
-        if not isinstance(db_path, str):
-            raise TypeError("db_config.db_path 必须是字符串类型（数据库文件路径）")
+        # ========== 1. 校验聊天记录DB路径（chat_db_path） ==========
+        chat_db_path = db_config_dict.get("chat_db_path")
+        # 1.1 非空校验
+        if not chat_db_path:
+            raise ValueError("db_config.chat_db_path 为必填项，不能为空（聊天记录数据库路径）")
+        # 1.2 类型校验
+        if not isinstance(chat_db_path, str):
+            raise TypeError("db_config.chat_db_path 必须是字符串类型（聊天记录数据库文件路径）")
+        # 1.3 文件存在性校验
+        if not os.path.exists(chat_db_path):
+            raise FileNotFoundError(f"聊天记录数据库文件不存在：{chat_db_path}（请检查路径是否正确）")
 
-        # 2. 校验数据库文件是否存在
-        if not os.path.exists(db_path):
-            raise FileNotFoundError(f"数据库文件不存在：{db_path}（请检查路径是否正确）")
+        # ========== 2. 校验联系人DB路径（contact_db_path） ==========
+        contact_db_path = db_config_dict.get("contact_db_path")
+        # 2.1 非空校验
+        if not contact_db_path:
+            raise ValueError("db_config.contact_db_path 为必填项，不能为空（联系人数据库路径）")
+        # 2.2 类型校验
+        if not isinstance(contact_db_path, str):
+            raise TypeError("db_config.contact_db_path 必须是字符串类型（联系人数据库文件路径）")
+        # 2.3 文件存在性校验
+        if not os.path.exists(contact_db_path):
+            raise FileNotFoundError(f"联系人数据库文件不存在：{contact_db_path}（请检查路径是否正确）")
 
-        # 3. 校验 max_concurrency（类型+取值范围）
+        # ========== 3. max_concurrency 校验（原有逻辑不变） ==========
         max_concurrency = db_config_dict.get("max_concurrency", 10)  # 默认值10
         # 3.1 校验类型（必须是整数）
         if not isinstance(max_concurrency, int):
@@ -60,7 +73,8 @@ class ConfigParser:
             raise ValueError("db_config.max_concurrency 最大不能超过20（避免数据库压力过大）")
 
         return DBConfig(
-            db_path=db_path,
+            chat_db_path=chat_db_path,
+            contact_db_path=contact_db_path,
             max_concurrency=max_concurrency
         )
 
@@ -176,13 +190,13 @@ class ConfigParser:
             raise ValueError("filter_config.filter_group_chat 必须是布尔值（true/false）")
 
         # 过滤消息类型（默认过滤语音/图片/视频/文件）
-        filter_msg_types = filter_dict.get("filter_msg_types", ["voice", "image", "video", "file"])
-        valid_msg_types = ["voice", "image", "video", "file", "location", "link"]
-        if not isinstance(filter_msg_types, list):
-            raise ValueError("filter_config.filter_msg_types 必须是列表")
-        for msg_type in filter_msg_types:
-            if msg_type not in valid_msg_types:
-                raise ValueError(f"filter_msg_types 包含不支持的类型：{msg_type}，可选值：{valid_msg_types}")
+        # filter_msg_types = filter_dict.get("filter_msg_types", ["voice", "image", "video", "file"])
+        # valid_msg_types = ["voice", "image", "video", "file", "location", "link"]
+        # if not isinstance(filter_msg_types, list):
+        #     raise ValueError("filter_config.filter_msg_types 必须是列表")
+        # for msg_type in filter_msg_types:
+        #     if msg_type not in valid_msg_types:
+        #         raise ValueError(f"filter_msg_types 包含不支持的类型：{msg_type}，可选值：{valid_msg_types}")
 
         # 口头禅最小长度（默认1，≥1）
         min_phrase_length = filter_dict.get("min_phrase_length", 1)
@@ -191,47 +205,33 @@ class ConfigParser:
 
         return FilterConfig(
             filter_group_chat=filter_group_chat,
-            filter_msg_types=filter_msg_types,
-            min_phrase_length=min_phrase_length
+            # filter_msg_types=filter_msg_types,
+            # min_phrase_length=min_phrase_length
         )
 
     @staticmethod
-    def _parse_output(output_dict: Dict) -> OutputConfig:
-        """解析输出配置（含路径校验）"""
-        # 输出路径（必填）
-        output_path = output_dict.get("output_path")
-        if not output_path:
-            raise ValueError("output_config.output_path 必须填写（如：/Users/xxx/Desktop/统计结果）")
+    def _parse_output_config(output_config_dict: Dict) -> OutputConfig:
+        """校验并解析输出配置（极简版，仅处理display_dimension+export_path）"""
+        # 1. 校验 display_dimension
+        valid_dimensions = ["year", "month", "day"]
+        display_dimension = output_config_dict.get("display_dimension", "month")
+        if display_dimension not in valid_dimensions:
+            raise ValueError(
+                f"output_config.display_dimension 仅支持 {valid_dimensions}，当前值：{display_dimension}"
+            )
 
-        # 确保路径存在（不存在则创建）
-        output_path = os.path.abspath(output_path)
-        if not os.path.exists(output_path):
-            try:
-                os.makedirs(output_path)
-                print(f"⚠️  输出路径不存在，已自动创建：{output_path}")
-            except Exception as e:
-                raise ValueError(f"创建输出路径失败：{e}")
+        # 2. 校验 export_path（默认值+路径合法性+自动创建）
+        export_path = output_config_dict.get("export_path", "Reference/output/")
+        if not isinstance(export_path, str):
+            raise TypeError("output_config.export_path 必须是字符串类型（文件输出路径）")
 
-        # 输出格式（默认json）
-        output_format = output_dict.get("output_format", "json")
-        valid_formats = ["json", "csv"]
-        if output_format not in valid_formats:
-            raise ValueError(f"output_config.output_format 必须是 {valid_formats} 中的一种")
+        # 自动创建输出目录（不存在则创建）
+        if not os.path.exists(export_path):
+            os.makedirs(export_path, exist_ok=True)
+            print(f"📁 输出目录不存在，已自动创建：{export_path}")
 
-        # 显示明细（默认True）
-        show_detail = output_dict.get("show_detail_distribution", True)
-        if not isinstance(show_detail, bool):
-            raise ValueError("output_config.show_detail_distribution 必须是布尔值（true/false）")
-
-        # 排序方式（默认count_desc）
-        sort_by = output_dict.get("sort_by", "count_desc")
-        valid_sort = ["count_desc", "phrase_asc"]
-        if sort_by not in valid_sort:
-            raise ValueError(f"output_config.sort_by 必须是 {valid_sort} 中的一种")
-
+        # 3. 返回解析后的 OutputConfig
         return OutputConfig(
-            output_path=output_path,
-            output_format=output_format,
-            show_detail_distribution=show_detail,
-            sort_by=sort_by
+            display_dimension=display_dimension,
+            export_path=export_path
         )
