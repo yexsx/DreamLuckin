@@ -1,18 +1,18 @@
 {
   "config_name": "梦瑞幸配置文件",
-  "db_connection": {
-    "chat_db_path": "D:\\programmer\\soul\\DreamLuckin\\Reference\\contact_decrypted.db",
-    "contact_db_path": "D:\\programmer\\soul\\DreamLuckin\\Reference\\message_0_decrypted.db",
+  "db_config": {
+    "contact_db_path": "D:\\programmer\\soul\\DreamLuckin\\configs\\contact_decrypted.db",
+    "chat_db_path": "D:\\programmer\\soul\\DreamLuckin\\configs\\message_0_decrypted.db",
     "max_concurrency": 10
   },
   "stat_mode": {
     "mode_type": "self_to_target",
-    "target_contact": "对方昵称_小明"
+    "target_contact": "成兮昂"
   },
   "time_config": {
-    "stat_dimension": "week",
+    "stat_dimension": "day",
     "time_range_type": "recent",
-    "recent_num": 4,
+    "recent_num": 10,
     "custom_start_date": "2025-01-01",
     "custom_end_date": "2025-11-30"
   },

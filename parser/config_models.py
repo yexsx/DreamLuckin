@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from typing import Optional, List, Literal
+from typing import Optional, List
 
 
 # ------------------------------
@@ -39,9 +39,9 @@ class TimeConfig:
 @dataclass
 class PetPhraseConfig:
     pet_phrases: List[str]
-    case_sensitive: bool = False  # 是否大小写敏感
+    # case_sensitive: bool = False  # 是否大小写敏感
     whole_word_match: bool = False  # 是否全词匹配
-    ignore_emoji_space: bool = True  # 是否忽略表情和空格
+    # ignore_emoji_space: bool = True  # 是否忽略表情和空格
 
 
 # ------------------------------

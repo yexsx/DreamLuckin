@@ -1,7 +1,7 @@
 import re
 from typing import List
 
-from configs import TimeConfig, PetPhraseConfig
+from parser import TimeConfig, PetPhraseConfig
 import datetime
 
 

@@ -1,6 +1,9 @@
 from abc import ABC, abstractmethod
 from typing import Dict, List, TypeAlias
 
+from parser import AppConfig
+from services import ContactDBService,ChatRecordDBService
+
 # 类型别名：统一核心记录结构（所有策略复用）
 CoreRecord: TypeAlias = Dict[str, int | str]
 # 类型别名：统一表处理结果结构（单表/多表返回类型一致）
@@ -13,10 +16,10 @@ class StatStrategy(ABC):
     """统计策略抽象接口类（所有策略的基类）"""
 
     def __init__(
-        self,
-        chat_db_service,  # 聊天记录DB服务实例（LuckyChatDBService）
-        contact_db_service,  # 联系人DB服务实例（ContactDBService）
-        app_config  # 全局配置实例（AppConfig）
+            self,
+            chat_db_service: ChatRecordDBService,  # 聊天记录DB服务实例（LuckyChatDBService）
+            contact_db_service: ContactDBService,  # 联系人DB服务实例（ContactDBService）
+            app_config: AppConfig  # 全局配置实例（AppConfig）
     ):
         self.chat_db_service = chat_db_service
         self.contact_db_service = contact_db_service
@@ -34,7 +37,7 @@ class StatStrategy(ABC):
         pass
 
     @abstractmethod
-    def _get_pending_tables(self) -> List[str]:
+    async def _get_pending_tables(self) -> List[str]:
         """步骤2：获取待处理的表列表
         返回：
             List[str]：待处理的Msg表名列表（单表策略返回长度为1的列表）
@@ -66,33 +69,15 @@ class StatStrategy(ABC):
         """
         pass
 
-    def run(self) -> AggregateResult:
+    async def run(self) -> AggregateResult:
         """策略执行入口（统一串联所有步骤，无需重写）"""
         # 步骤1：获取映射关系
         self._associate_mapping()
         # 步骤2：获取待处理表
-        pending_tables = self._get_pending_tables()
+        pending_tables = await self._get_pending_tables()
         # 步骤3：处理表数据
         self.process_result = self._process_tables(pending_tables)
         # 步骤4：回溯上下文
         self._backtrack_context()
         # 步骤5：聚合统计
         return self._aggregate_stat()
-
-
-# ------------------------------
-# 策略工厂（根据mode_type创建对应策略实例）
-# ------------------------------
-# class StatStrategyFactory:
-#     """策略工厂：隐藏策略创建细节，统一入口"""
-#
-#     @staticmethod
-#     def create_strategy(mode_type: str) -> StatStrategy:
-#         strategy_map = {
-#             "self_all": SelfAllStrategy(),
-#             "self_to_target": SelfToTargetStrategy(),
-#             "target_to_self": TargetToSelfStrategy()
-#         }
-#         if mode_type not in strategy_map:
-#             raise ValueError(f"不支持的统计模式：{mode_type}")
-#         return strategy_map[mode_type]
