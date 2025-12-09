@@ -1,4 +1,5 @@
 import logging
+from abc import abstractmethod, ABCMeta
 from typing import Optional, List, Dict, Any
 import sqlite3  # 同步库
 
@@ -11,7 +12,7 @@ from exceptions import (
 
 logger = logging.getLogger(__name__)
 
-class LuckyDBBaseServiceSync:
+class LuckyDBBaseServiceSync(metaclass=ABCMeta):
     """同步数据库服务类（预加载单例模式），基于 sqlite3"""
     _instance: Optional["LuckyDBBaseServiceSync"] = None
     _db_connection: Optional[sqlite3.Connection] = None
@@ -29,6 +30,7 @@ class LuckyDBBaseServiceSync:
         # 直接创建实例+初始化连接（无并发风险，因程序启动时仅调用一次）
         cls._instance = super().__new__(cls)
         cls._instance._init_db(db_path)
+        cls._instance._test_db_connection()
         return cls._instance
 
     @classmethod
@@ -74,3 +76,12 @@ class LuckyDBBaseServiceSync:
     def destroy_instance(cls):
         if cls._instance:
             cls._instance.close()
+
+    #测试数据库连接，子类必须实现
+    @abstractmethod
+    def _test_db_connection(self) -> None:
+        """
+        抽象方法：测试数据库是否正常连接
+        子类需实现具体的测试逻辑（如执行简单查询、检查连接状态等）
+        """
+        pass  # 暂时不实现，仅定义接口

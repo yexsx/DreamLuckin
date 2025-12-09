@@ -1,62 +1,110 @@
-import hashlib
-import datetime
-from typing import Dict, List, Any
+import asyncio
+from typing import List, Dict, Any
 import logging
-from strategies import *
+from ..stat_strategies import StatStrategy
+
+from ..types import (ProcessResult, AggregateResult, MappingCache)
+from exceptions import (TargetTableNotFoundError)
 
 class SelfToTargetStrategy(StatStrategy):
     """self_to_target 策略具体实现类（本人发给目标）"""
 
-    def _associate_mapping(self) -> None:
-        """步骤1：预获取目标的单表映射（remark/nick_name→username→MD5→表名）"""
-        # 1. 从配置读取目标值（无需区分match_type，仅读目标值）
-        target_value = self.app_config.stat_mode.target_contact  # 仅读取目标匹配值
-
-        # 2. 精准查询contact表（同时匹配remark和nick_name，OR条件）
-        contact_sql = """
-                      SELECT username, local_type, remark, nick_name FROM contact WHERE remark = ? OR nick_name = ?
-                      """
-        contact_result = self.contact_db_service.execute_query(contact_sql, (target_value, target_value))
-
-        # 校验结果数量：0条/多条均报错，仅1条合法
-        if len(contact_result) == 0:
-            raise RuntimeError(f"未找到remark或nick_name等于[{target_value}]的联系人/群聊")
-        elif len(contact_result) > 1:
-            raise RuntimeError(
-                f"找到多条remark或nick_name等于[{target_value}]的记录（共{len(contact_result)}条），请缩小匹配范围")
-        contact_info = contact_result[0]
-
-        # 3. username转MD5生成目标表名
-        username = contact_info["username"]
-        md5_username = hashlib.md5(username.encode()).hexdigest().lower()
-        target_table_name = f"Msg_{md5_username}"
-
-        # 4. 存入映射缓存（表名→联系人信息）
-        self.mapping_cache[target_table_name] = {
-            "name": contact_info["remark"] or contact_info["nick_name"],
-            "type": "friend" if contact_info["local_type"] == 1 else "group",
-            "username": username
-        }
-
-    async def _get_pending_tables(self) -> List[str]:
-        """步骤2：获取唯一待处理表（从映射缓存中提取）"""
-        if not self.mapping_cache:
-            raise RuntimeError("映射缓存为空，请先执行_associate_mapping")
-        target_table_name = list(self.mapping_cache.keys())[0]
-
-        # 替换：从sqlite_sequence校验表存在性，并获取记录总数
-        table_exist_sql = "SELECT seq FROM sqlite_sequence WHERE name = ?"
-        exist_result = await self.chat_db_service.execute_query(table_exist_sql, (target_table_name,))
-
-        if not exist_result:
-            raise RuntimeError(f"目标表{target_table_name}不存在于聊天记录数据库（sqlite_sequence无该表记录）")
-
-        # 提取记录总数并打印日志
-        total_records = exist_result[0]["seq"]
-        logging.info(f"✅ 目标表[{target_table_name}]存在，该表总聊天记录数：{total_records}条")
-
-        return [target_table_name]  # 单表返回长度为1的列表
-
+    # async def _process_tables(self, valid_tables: List[str]) -> Dict[str, Any]:
+    #     """
+    #     协程版：并行处理所有有效表的聊天记录
+    #     :param valid_tables: 待处理的表名列表
+    #     :return: 处理结果汇总（表名→处理状态/数据量/异常信息）
+    #     """
+    #
+    #     # ========== 1. 定义单表处理的协程函数（核心子任务） ==========
+    #     async def _process_single_table(table_name: str) -> Dict[str, Any]:
+    #         """协程：处理单个表，返回该表的处理结果"""
+    #         result = {
+    #             "table_name": table_name,
+    #             "contact_info": self.mapping_cache.get(table_name),
+    #             "status": "success",
+    #             "processed_count": 0,
+    #             "error_msg": None
+    #         }
+    #         try:
+    #             # 获取联系人信息（用于日志）
+    #             contact_info = result["contact_info"]
+    #             contact_name = contact_info["nickname"] if contact_info else "未知联系人"
+    #
+    #             # 【核心业务逻辑】异步查询表数据（需确保chat_db_service的方法是async）
+    #             # 示例：查询表的聊天记录总数/具体数据（替换为你的实际业务逻辑）
+    #             table_data = await self.chat_db_service.get_chat_records(table_name)
+    #             processed_count = len(table_data) if table_data else 0
+    #
+    #             # 【自定义业务处理】（替换为你的实际逻辑：统计/解析/入库等）
+    #             # 比如：统计消息数、关键词分析、数据清洗等
+    #             # ...
+    #
+    #             # 更新结果
+    #             result["processed_count"] = processed_count
+    #             logging.info(
+    #                 f"✅ 【单表处理完成】联系人[{contact_name}] | 表[{table_name}] | "
+    #                 f"处理聊天记录数：{processed_count}条"
+    #             )
+    #
+    #         except Exception as e:
+    #             # 单个表处理失败：标记状态+记录异常，不影响其他表
+    #             result["status"] = "failed"
+    #             result["error_msg"] = str(e)
+    #             contact_name = result["contact_info"]["nickname"] if result["contact_info"] else table_name
+    #             logging.error(
+    #                 f"❌ 【单表处理失败】联系人[{contact_name}] | 表[{table_name}] | "
+    #                 f"异常信息：{e}"
+    #             )
+    #         return result
+    #
+    #     # ========== 2. 批量创建协程任务，并行执行 ==========
+    #     # 创建所有单表处理任务
+    #     tasks = [asyncio.create_task(_process_single_table(table_name)) for table_name in valid_tables]
+    #     # 等待所有任务完成（返回结果列表），return_exceptions=True：单个任务异常不中断整体
+    #     task_results = await asyncio.gather(*tasks, return_exceptions=False)
+    #
+    #     # ========== 3. 汇总处理结果 ==========
+    #     summary = {
+    #         "total_tables": len(valid_tables),
+    #         "success_tables": 0,
+    #         "failed_tables": 0,
+    #         "total_processed_count": 0,
+    #         "failed_table_details": [],
+    #         "table_results": {}  # 表名→详细结果
+    #     }
+    #
+    #     for res in task_results:
+    #         table_name = res["table_name"]
+    #         summary["table_results"][table_name] = res
+    #
+    #         if res["status"] == "success":
+    #             summary["success_tables"] += 1
+    #             summary["total_processed_count"] += res["processed_count"]
+    #         else:
+    #             summary["failed_tables"] += 1
+    #             summary["failed_table_details"].append({
+    #                 "table_name": table_name,
+    #                 "contact_name": res["contact_info"]["nickname"] if res["contact_info"] else table_name,
+    #                 "error_msg": res["error_msg"]
+    #             })
+    #
+    #     # ========== 4. 输出汇总日志（对齐前文风格） ==========
+    #     logging.info(
+    #         f"✅ 【表处理汇总】总待处理表数：{summary['total_tables']} | "
+    #         f"处理成功：{summary['success_tables']} | 处理失败：{summary['failed_tables']} | "
+    #         f"累计处理聊天记录数：{summary['total_processed_count']}条"
+    #     )
+    #
+    #     # 输出失败表详情
+    #     if summary["failed_table_details"]:
+    #         for fail in summary["failed_table_details"]:
+    #             logging.warning(
+    #                 f"⚠️ 【处理失败表】联系人[{fail['contact_name']}] | 表[{fail['table_name']}] | "
+    #                 f"异常：{fail['error_msg']}"
+    #             )
+    #
+    #     return summary
 
     def _process_tables(self, pending_tables: List[str]) -> ProcessResult:
         """步骤3：单表同步处理（本人发给目标的核心记录）"""

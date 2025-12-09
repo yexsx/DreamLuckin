@@ -7,7 +7,7 @@
   },
   "stat_mode": {
     "mode_type": "self_to_target",
-    "target_contact": "成兮昂"
+    "target_contact_list": ["成兮昂", "咖喱南", "KT", "许嵩"]
   },
   "time_config": {
     "stat_dimension": "day",
@@ -25,6 +25,6 @@
   },
   "output_config": {
     "display_dimension": "month",
-    "export_path": "Reference/output/"
+    "export_path": "./output/"
   }
 }

@@ -18,7 +18,7 @@ class DBConfig:
 @dataclass
 class StatModeConfig:
     mode_type: str  # self_all / self_to_target / target_to_self
-    target_contact: Optional[str] = None
+    target_contact_list: Optional[List[str]] = None
 
 
 # ------------------------------

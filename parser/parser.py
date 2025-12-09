@@ -14,7 +14,6 @@ from exceptions import (
 
 logger = logging.getLogger(__name__)
 
-
 # ------------------------------
 # 配置解析器（核心：校验+转换配置）
 # ------------------------------
@@ -91,49 +90,53 @@ class ConfigParser:
     @staticmethod
     def _parse_stat_mode(stat_mode_dict: Dict) -> StatModeConfig:
         """解析并校验统计模式"""
-        # 1. 方法启动日志（INFO级：标记解析开始，进度可视）
-        # logger.info("[stat_mode] 开始解析统计模式配置")
-        # logger.debug(f"[stat_mode] 原始配置字典：{stat_mode_dict}")
 
         # 解析mode_type并校验
         mode_type = stat_mode_dict.get("mode_type")
         valid_modes = ["self_all", "self_to_target", "target_to_self"]
-        # logger.debug(f"[stat_mode] 解析到mode_type值：{mode_type}（合法值范围：{valid_modes}）")
 
         if not mode_type or mode_type not in valid_modes:
             # 2. 校验失败日志（ERROR级：记录错误原因，便于排查）
-            # logger.error(f"[stat_mode] mode_type校验失败：值为{mode_type}，必须是{valid_modes}中的一种")
             raise InvalidValueError(f"stat_mode.mode_type 必须是 {valid_modes} 中的一种")
 
-        # 校验通过日志（DEBUG级：细节追踪）
-        # logger.debug(f"[stat_mode] mode_type={mode_type} 校验通过")
+        # 解析target_contact_list并校验
+        target_contact_list = stat_mode_dict.get("target_contact_list")
 
-        # 解析target_contact并校验
-        target_contact = stat_mode_dict.get("target_contact")
-        # logger.debug(f"[stat_mode] 解析到target_contact值：{target_contact}")
+        # self_all 模式下 target_contact_list 必须为空列表
+        if mode_type == "self_all":
+            if target_contact_list != []:
+                raise InvalidValueError(
+                    f"mode_type={mode_type} 时，target_contact_list 必须为空列表（[]），当前值：{target_contact_list}")
 
-        # 后两种模式必须指定target_contact
-        if mode_type in ["self_to_target", "target_to_self"] and not target_contact:
-            # logger.error(f"[stat_mode] target_contact校验失败：mode_type={mode_type} 时，target_contact不能为空")
-            raise MissingRequiredFieldError(f"mode_type={mode_type} 时，必须填写 target_contact")
+        # 后两种模式必须指定target_contact_list
+        if mode_type in ["self_to_target", "target_to_self"] and not target_contact_list:
+            raise MissingRequiredFieldError(f"mode_type={mode_type} 时，必须填写 target_contact_list")
 
-        # 非必填场景的日志（DEBUG级）
-        # if mode_type == "self_all" and not target_contact:
-        #     logger.debug(f"[stat_mode] mode_type={mode_type}，target_contact非必填，当前值为None")
-        # elif target_contact:
-        #     logger.debug(f"[stat_mode] target_contact={target_contact} 校验通过（已自动去除首尾空格）")
+        # 核心合并校验：指定模式下target_contact_list必须是「非空列表」且「所有元素都是非空字符串」
+        if mode_type in ["self_to_target", "target_to_self"]:
+            # 先校验是否为列表
+            if not isinstance(target_contact_list, list):
+                raise InvalidTypeError("target_contact_list 必须为列表类型")
+
+            # 遍历列表，校验所有元素都是非空字符串（合并原3.2/3.3/3.4）
+            invalid_elements = []
+            for idx, val in enumerate(target_contact_list):
+                # 元素不是字符串 或 是空字符串（""），记录索引和问题
+                if not isinstance(val, str) or len(val) == 0:
+                    issue = "非字符串类型" if not isinstance(val, str) else "空字符串"
+                    invalid_elements.append(f"索引{idx}（{issue}）")
+
+            # 有无效元素则报错；列表为空也会触发（invalid_elements包含索引0的空字符串）
+            if invalid_elements:
+                raise InvalidValueError(
+                    f"target_contact_list 列表中所有元素必须是非空字符串，无效元素：{', '.join(invalid_elements)}"
+                )
 
         # 构造返回对象
-        stat_mode_config = StatModeConfig(
+        return StatModeConfig(
             mode_type=mode_type,
-            target_contact=target_contact.strip() if target_contact else None
+            target_contact_list=target_contact_list
         )
-
-        # 3. 方法结束日志（INFO级：标记解析完成，进度闭环）
-        # logger.info(
-        #     f"[stat_mode] 统计模式配置解析完成，最终配置：mode_type={mode_type}，target_contact={stat_mode_config.target_contact}")
-
-        return stat_mode_config
 
 
 
@@ -256,14 +259,14 @@ class ConfigParser:
             raise InvalidValueError(f"output_config.display_dimension 仅支持 {valid_dimensions}，当前值：{display_dimension}")
 
         # 2. 校验 export_path（默认值+路径合法性+自动创建）
-        export_path = output_config_dict.get("export_path", "configs/output/")
+        export_path = output_config_dict.get("export_path", "./output/")
         if not isinstance(export_path, str):
             raise InvalidTypeError("output_config.export_path 必须是字符串类型（文件输出路径）")
 
         # 自动创建输出目录（不存在则创建）
         if not os.path.exists(export_path):
             os.makedirs(export_path, exist_ok=True)
-            logging.info("📁 输出目录不存在，已自动创建：%s",export_path)
+            logger.info("📁 输出目录不存在，已自动创建：%s",export_path)
 
         # 3. 返回解析后的 OutputConfig
         return OutputConfig(

@@ -20,6 +20,13 @@ from .parse_exceptions import (
     DateFormatError
 )
 
+# 业务异常
+from .stat_exception import (
+    StatBaseException,
+    ContactNotFoundError,
+    TargetTableNotFoundError
+)
+
 # ====================== 2. 定义分组（核心：按模块归类） ======================
 # 数据库异常分组（仅包含数据库相关）
 DB_EXCEPTIONS = (
@@ -40,8 +47,15 @@ PARSE_EXCEPTIONS = (
     DateFormatError
 )
 
+# 业务异常分组
+STAT_BASE_EXCEPTIONS = (
+    StatBaseException,
+    TargetTableNotFoundError,
+    ContactNotFoundError
+)
+
 # ====================== 3. 优化__all__（可选：控制import *的行为） ======================
 # 若想让 `from exceptions import *` 只导入数据库异常（按需调整），可这样写：
 # __all__ = [e.__name__ for e in DB_EXCEPTIONS]
 # 若想保留所有异常（默认），则：
-__all__ = [e.__name__ for e in DB_EXCEPTIONS + PARSE_EXCEPTIONS]
+__all__ = [e.__name__ for e in DB_EXCEPTIONS + PARSE_EXCEPTIONS + STAT_BASE_EXCEPTIONS]

@@ -1,7 +1,5 @@
 import asyncio
-import json
 import logging
-import os
 import sys
 
 # ====================== 1. 全局日志配置 ======================
@@ -22,34 +20,15 @@ from parser import AppConfig, ConfigParser  # 统一的应用配置模型（包�
 # 数据库服务相关
 from services import ContactDBService,ChatRecordDBService
 # 异常相关
-from exceptions import ParseBaseError, LuckyChatDBError
+from exceptions import ParseBaseError, LuckyChatDBError, StatBaseException
 # # 策略工厂 + 接口
 from strategies import StatStrategyFactory
-
-# ====================== 3. 配置文件路径（Windows路径处理） ======================
-CONFIG_FILE_PATH = r"./configs/config.json"  # 原始字符串避免转义
-
-
-# ====================== 4. 读取配置文件 ======================
-def load_config_file(file_path: str) -> dict:
-    """读取JSON配置文件"""
-    try:
-        # 检查文件是否存在
-        if not os.path.exists(file_path):
-            raise FileNotFoundError(f"配置文件不存在：{file_path}")
-
-        # 读取并解析JSON
-        with open(file_path, "r", encoding="utf-8") as f:
-            config_dict = json.load(f)
-        logger.info(f"✅ 成功读取配置文件：{file_path}")
-        return config_dict
-    except json.JSONDecodeError as e:
-        raise ParseBaseError(f"配置文件JSON格式错误：{e}")
-    except Exception as e:
-        raise ParseBaseError(f"读取配置文件失败：{e}")
+# 导入配置加载门面类
+from utils import ConfigLoader
 
 
-# ====================== 5. 核心异步主函数 ======================
+
+# ====================== 3. 核心异步主函数 ======================
 async def main():
     """程序主入口：读取配置 → 统一解析 → 初始化数据库 → 工厂创建策略 → 执行策略"""
     logger.info("===== 聊天记录统计程序启动 =====")
@@ -57,8 +36,8 @@ async def main():
     try:
         # -------------------------- 步骤1：读取+统一解析配置 --------------------------
         logger.info("【步骤1/4】开始读取并解析配置文件")
-        # 读取配置文件
-        config_dict = load_config_file(CONFIG_FILE_PATH)
+        # 调用门面类加载配置（默认路径：./configs/config.json；如需自定义可传参：ConfigLoader.load_config("D:/xxx/config.json")）
+        config_dict = ConfigLoader.load_config()
         # 统一调用ConfigParser的parse方法（核心修正：替代逐个调用）
         app_config: AppConfig = ConfigParser.parse(config_dict)
         logger.info("✅ 所有配置统一解析完成")
@@ -106,6 +85,9 @@ async def main():
     except LuckyChatDBError as e:
         logger.error(f"【数据库初始化失败】{e}", exc_info=True)
         sys.exit(1)
+    except StatBaseException as e:
+        logger.error(f"【统计策略执行失败】{e}", exc_info=True)
+        sys.exit(1)
     except Exception as e:
         logger.error(f"【程序执行异常】未知错误：{e}", exc_info=True)
         sys.exit(1)
@@ -118,6 +100,17 @@ async def main():
         logger.info("===== 聊天记录统计程序结束 =====")
 
 
-# ====================== 6. 程序入口 ======================
+# ====================== 4. 程序入口 ======================
 if __name__ == "__main__":
     asyncio.run(main())
+
+
+
+# TODO
+# 1.数据库启动检验是否正确，有concat或message √
+# 2.策略实现类封装sql方法到服务类 √
+# 3.main方法读取文件封装工具类 √
+# 4.实现策略类自定义业务异常 √
+# 5.main的日志方法优化
+# 6.sql_builder逻辑实现
+# 7.selfToTarget子类实现
