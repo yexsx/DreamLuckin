@@ -201,14 +201,22 @@ class ConfigParser:
         if len(pet_phrases) == 0:
             raise InvalidValueError("pet_phrase_config.pet_phrases 列表中不能全是空字符串")
 
+        # match_type 校验
+        match_type = pet_phrase_dict.get("match_type", "contains").strip()
+        valid_match_types = ["contains", "exact"]
+        if match_type not in valid_match_types:
+            raise InvalidValueError(
+                f"pet_phrase_config.match_type 有效值为{valid_match_types}，当前值：{match_type}"
+            )
+
         # 布尔型参数校验（默认False/True）
         # case_sensitive = pet_phrase_dict.get("case_sensitive", False)
         # if not isinstance(case_sensitive, bool):
         #     raise ValueError("pet_phrase_config.case_sensitive 必须是布尔值（true/false）")
 
-        whole_word_match = pet_phrase_dict.get("whole_word_match", False)
-        if not isinstance(whole_word_match, bool):
-            raise InvalidTypeError("pet_phrase_config.whole_word_match 必须是布尔值（true/false）")
+        # whole_word_match = pet_phrase_dict.get("whole_word_match", False)
+        # if not isinstance(whole_word_match, bool):
+        #     raise InvalidTypeError("pet_phrase_config.whole_word_match 必须是布尔值（true/false）")
 
         # ignore_emoji_space = pet_phrase_dict.get("ignore_emoji_space", True)
         # if not isinstance(ignore_emoji_space, bool):
@@ -216,8 +224,9 @@ class ConfigParser:
 
         return PetPhraseConfig(
             pet_phrases=pet_phrases,
+            match_type=match_type
             # case_sensitive=case_sensitive,
-            whole_word_match=whole_word_match,
+            # whole_word_match=whole_word_match,
             # ignore_emoji_space=ignore_emoji_space
         )
 

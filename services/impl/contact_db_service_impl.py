@@ -9,17 +9,27 @@ logger = logging.getLogger(__name__)
 class ContactDBService(LuckyDBBaseServiceSync):
     """联系人数据库服务"""
 
-    def get_contacts(self, target_values: Optional[List[str]] = None) -> List[Dict[str, Any]]:
+    def get_contacts(self,
+                     target_values: Optional[List[str]] = None,
+                     filter_group_chat: bool = False) -> List[Dict[str, Any]]:
         """
         根据remark/nick_name批量查询联系人（适配列表参数）
         :param target_values: 匹配的remark/nick_name值列表（为空/None则查所有联系人）
+        :param filter_group_chat: True=仅查好友(local_type=1)，False=查好友+群聊+群友(local_type IN (1,2,3))
         :return: 联系人列表
         """
-        # 1. 基础SQL
-        base_sql = "SELECT username, local_type, remark, nick_name FROM contact WHERE local_type IN (1, 2, 3)"
+
+        # 1. 动态拼接local_type条件（核心简化点）
+        if filter_group_chat:
+            local_type_cond = "local_type = 1"  # 过滤群聊：仅好友
+        else:
+            local_type_cond = "local_type IN (1, 2, 3)"  # 不过滤：好友+群聊+群友
+
+        # 2. 基础SQL
+        base_sql = f"SELECT username, local_type, remark, nick_name FROM contact WHERE {local_type_cond}"
         params = tuple()
 
-        # 2. 有效列表则拼接IN条件
+        # 3. 有效列表则拼接IN条件
         if target_values:
             # 生成IN的占位符（如3个值则为 ?,?,?）
             placeholders = ", ".join(["?"] * len(target_values))

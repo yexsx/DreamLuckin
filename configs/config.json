@@ -7,21 +7,21 @@
   },
   "stat_mode": {
     "mode_type": "self_to_target",
-    "target_contact_list": ["成兮昂", "咖喱南", "KT", "许嵩"]
+    "target_contact_list": ["成兮昂", "咖喱南", "60%", "许嵩", "KT"]
   },
   "time_config": {
-    "stat_dimension": "day",
+    "stat_dimension": "month",
+    "recent_num": 12,
     "time_range_type": "recent",
-    "recent_num": 10,
     "custom_start_date": "2025-01-01",
-    "custom_end_date": "2025-11-30"
+    "custom_end_date": "2025-12-11"
   },
   "pet_phrase_config": {
-    "pet_phrases": ["还真是", "确实", "笑死", "真的假的", "无语"],
-    "whole_word_match": false
+    "pet_phrases": ["好的", "okk"],
+    "match_type": "contains"
   },
   "filter_config": {
-    "filter_group_chat": true
+    "filter_group_chat": false
   },
   "output_config": {
     "display_dimension": "month",

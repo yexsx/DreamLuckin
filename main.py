@@ -112,5 +112,10 @@ if __name__ == "__main__":
 # 3.main方法读取文件封装工具类 √
 # 4.实现策略类自定义业务异常 √
 # 5.main的日志方法优化
-# 6.sql_builder逻辑实现
-# 7.selfToTarget子类实现
+# 6.sql_builder逻辑实现 √
+# 7.selfToTarget子类实现 ×
+# 8.策略接口变成具体实现类
+# 9.待处理列表从高到低排
+# 10._process_tables和_backtrack_context实现协程
+# 11.未过滤群聊的精确搜索
+# 12.联系人类型枚举

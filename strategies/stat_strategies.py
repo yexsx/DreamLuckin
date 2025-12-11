@@ -1,12 +1,14 @@
+import datetime
 import hashlib
 import logging
 from abc import ABC, abstractmethod
 from typing import Dict, List
 
-from exceptions import (ContactNotFoundError,TargetTableNotFoundError)
+from exceptions import ContactNotFoundError, TargetTableNotFoundError
 from parser import AppConfig
 from services import ContactDBService, ChatRecordDBService
-from .types import (ProcessResult, AggregateResult, MappingCache)
+from utils import SQLBuilder
+from .stat_models import ContactRecord, ChatRecord, StrategyResult
 
 logger = logging.getLogger(__name__)
 
@@ -23,34 +25,25 @@ class StatStrategy(ABC):
         self.contact_db_service = contact_db_service
         self.app_config = app_config
         # 缓存：映射关系（表名→联系人信息）
-        self.mapping_cache: MappingCache = {}
+        self.mapping_cache: Dict[str, ContactRecord] = {}
         # 缓存：表处理结果（后续步骤复用）
-        self.process_result: ProcessResult = {}
+        self.process_result: Dict[str, ChatRecord] = {}
         # 缓存：带上下文的核心记录
         self.context_result: Dict[str, List[Dict[str, any]]] = {}
 
-    async def run(self) -> AggregateResult:
+    async def run(self) -> StrategyResult:
         """策略执行入口（统一串联所有步骤，无需重写）"""
         # 步骤1：获取映射关系
         self._associate_mapping()
         # 步骤2：获取待处理表
         pending_tables = await self._get_pending_tables()
         # 步骤3：处理表数据
-        self.process_result = self._process_tables(pending_tables)
+        self.process_result = await self._process_tables(pending_tables)
         # 步骤4：回溯上下文
         self._backtrack_context()
         # 步骤5：聚合统计
         return self._aggregate_stat()
 
-    @abstractmethod
-    async def _process_tables(self, pending_tables: List[str]) -> ProcessResult:
-        """步骤3：处理表数据（协程）
-        参数：
-            pending_tables：_get_pending_tables返回的待处理表列表
-        返回：
-            ProcessResult：{表名: 核心记录列表}
-        """
-        pass
 
     @abstractmethod
     def _backtrack_context(self) -> None:
@@ -60,10 +53,10 @@ class StatStrategy(ABC):
         pass
 
     @abstractmethod
-    def _aggregate_stat(self) -> AggregateResult:
+    def _aggregate_stat(self) -> StrategyResult:
         """步骤5：按维度聚合统计
         返回：
-            AggregateResult：聚合后的统计结果（含维度概览、明细等）
+            StrategyResult：聚合后的统计结果（含维度概览、明细等）
         """
         pass
 
@@ -74,9 +67,13 @@ class StatStrategy(ABC):
 
         # 1. 从配置读取目标值（无需区分match_type，仅读目标值）
         target_value = self.app_config.stat_mode.target_contact_list  # 仅读取目标匹配值
+        filter_group_chat = self.app_config.filter_config.filter_group_chat  # 过滤群聊配置
+
+        # ========== 执行查询前日志（仅必要信息） ==========
+        logger.info(f"🔍 开始查询联系人：目标值列表={target_value} | 过滤群聊={filter_group_chat}")
 
         # 2. 精准查询contact表（同时匹配remark和nick_name，OR条件）
-        contact_result = self.contact_db_service.get_contacts(target_value)
+        contact_result = self.contact_db_service.get_contacts(target_value, filter_group_chat)
 
         # 校验结果数量：0条报错
         if len(contact_result) == 0:
@@ -114,12 +111,12 @@ class StatStrategy(ABC):
                 contact_type = "unknown"  # 未知类型（兜底）
 
             # 3.3 存入映射缓存（表名→联系人信息，自动覆盖重复key）
-            self.mapping_cache[target_table_name] = {
-                "username": username,
-                "nickname": contact_name,
-                "type": contact_type,
-                "type_code": contact_info["local_type"]
-            }
+            self.mapping_cache[target_table_name] = ContactRecord(
+                username=username,
+                nickname=contact_name,
+                type=contact_type,
+                type_code=contact_info["local_type"]  # 对应原字典的type_code
+            )
 
             logger.info(
                 f"✅ 【映射缓存-{idx}/{len(contact_result)}】"
@@ -140,6 +137,7 @@ class StatStrategy(ABC):
             f"未匹配的配置值数量：{len(unmatched_config_values)} | "
             f"缓存表名数量：{len(self.mapping_cache)}"
         )
+
 
     async def _get_pending_tables(self) -> List[str]:
         """
@@ -162,7 +160,7 @@ class StatStrategy(ABC):
             if table_name not in table_seq_dict:
                 contact_info = self.mapping_cache[table_name]
                 missing_contacts.append(
-                    f"联系人[{contact_info['nickname']}](类型：{contact_info['type']})的聊天记录表[{table_name}]缺失"
+                    f"联系人[{contact_info.nickname}](类型：{contact_info.type})的聊天记录表[{table_name}]缺失"
                 )
                 continue
 
@@ -170,7 +168,7 @@ class StatStrategy(ABC):
             total_records = table_seq_dict[table_name]
             contact_info = self.mapping_cache[table_name]
             logger.info(
-                f"✅ 联系人[{contact_info['nickname']}]的目标表[{table_name}]存在，该表总聊天记录数：{total_records}条"
+                f"✅ 联系人[{contact_info.nickname}]的目标表[{table_name}]存在，该表总聊天记录数：{total_records}条"
             )
             valid_tables.append(table_name)
 
@@ -197,3 +195,59 @@ class StatStrategy(ABC):
         )
 
         return valid_tables
+
+
+    async def _process_tables(self, pending_tables: List[str]) -> dict[str, list[ChatRecord]]:
+        """
+            步骤3：处理表数据（协程）
+            参数：
+                pending_tables：_get_pending_tables返回的待处理表列表
+            返回：
+                Dict[str, list[ChatRecord]]：{表名: 聊天记录列表}
+        """
+
+        table_chat_records: Dict[str, List[ChatRecord]] = {}
+
+        pet_phrase_config = self.app_config.pet_phrase_config
+
+        # 1. 构建时间条件（所有表共用）
+        time_condition = SQLBuilder.build_time_condition(self.app_config.time_config)
+        # 2. 构建口头禅条件+参数（所有表共用）
+        phrase_condition, phrase_params = SQLBuilder.build_phrase_condition(pet_phrase_config)
+
+        logger.info(
+            f"🔧 构建公共查询条件：待处理表数={len(pending_tables)} | "
+            f"📝 口头禅列表={pet_phrase_config.pet_phrases}（匹配类型={pet_phrase_config.match_type}） | "
+            f"🕒 时间范围={time_condition} | "
+            f"🤖 仅查自己消息={True}"
+        )
+
+        for table_name in pending_tables:
+            # 1. 调用DB服务获取原始记录（字典列表）
+            raw_records = await self.chat_db_service.get_chat_records_by_phrase_and_time(
+                table_name=table_name,
+                phrase_condition=phrase_condition,
+                phrase_params=phrase_params,
+                time_condition=time_condition,
+                only_self_msg=self.app_config.stat_mode.mode_type is not "target_to_self"
+            )
+
+            # 2. 转换为ChatRecord对象（核心：字典→结构化类）
+            chat_records = []
+            for raw in raw_records:
+                # 匹配ChatRecord字段，补充matched_phrases（空列表兜底）
+                chat_record = ChatRecord(
+                    local_id=raw["local_id"],
+                    message_content=raw["message_content"],
+                    real_sender_id=raw["real_sender_id"],
+                    create_time=datetime.datetime.fromtimestamp(raw["create_time"]),
+                    matched_phrases=raw.get("matched_phrases", [])  # 若DB返回已匹配则直接用，否则空列表
+                )
+                chat_records.append(chat_record)
+
+            # 3. 存入结果字典
+            table_chat_records[table_name] = chat_records
+
+            logger.info(f"📊 处理表完成：表名={table_name} | 有效记录数={len(chat_records)}")
+
+        return table_chat_records
