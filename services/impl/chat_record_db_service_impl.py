@@ -1,5 +1,5 @@
 import logging
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Iterable, Set
 
 from exceptions import DBPreloadFailedError
 from services.base.lucky_base_db_service_async import LuckyDBBaseServiceAsync
@@ -64,6 +64,79 @@ class ChatRecordDBService(LuckyDBBaseServiceAsync):
         raw_records = await self.execute_query(base_sql, phrase_params)
 
         return raw_records
+
+    async def get_batch_context_records_by_local_ids(
+            self,
+            table_name: str,
+            core_local_id_set: Iterable[int],  # 同表的核心local_id集合/列表
+            limit: int = 3  # 每条核心记录追溯前3条
+    ) -> Dict[int, List[Dict[str, Any]]]:
+        """
+        批量查询同表多个核心ID的上下文：
+        1. 批量计算所有核心ID的前N条上下文ID
+        2. 一次IN查询所有上下文ID，减少DB调用
+        3. 按核心ID分组返回上下文（核心ID→对应上下文列表）
+        """
+        # 1. 去重+转集合（避免重复计算）
+        core_ids = set(core_local_id_set)
+
+        # 2. 批量计算所有核心ID的前N个上下文ID（核心逻辑）
+        # 例：核心ID={100,200} → 计算100-1=99、100-2=98；200-1=199、200-2=198 → 合并为{98,99,198,199}
+        context_id_candidates = []
+        for core_id in core_ids:
+            # 计算当前核心ID的前limit个ID
+            core_context_ids = [core_id - i for i in range(1, limit + 1)]
+            context_id_candidates.extend(core_context_ids)
+
+        # 3. 过滤无效ID（>0）+ 去重（避免重复查询同一ID）
+        valid_context_ids: Set[int] = set(filter(lambda x: x > 0, context_id_candidates))
+        if not valid_context_ids:
+            logger.debug(f"📌 无有效上下文ID：表名={table_name} | 核心ID={core_ids}")
+            return {core_id: [] for core_id in core_ids}
+
+        # 4. 构建批量查询SQL（IN+主键，精准无冗余）
+        placeholders = ", ".join(["?"] * len(valid_context_ids))
+        sql = f"""
+            SELECT local_id, message_content, real_sender_id, create_time
+            FROM {table_name}
+            WHERE local_type = 1
+              AND local_id IN ({placeholders})
+        """
+
+        # 5. 执行查询（复用你的execute_query）
+        try:
+            # 批量查询所有上下文记录
+            all_context_records = await self.execute_query(sql, tuple(valid_context_ids))
+            # 构建「上下文ID→上下文记录」的映射（方便后续分组）
+            context_id_map = {rec["local_id"]: rec for rec in all_context_records}
+
+            # 6. 按核心ID分组上下文（核心步骤：匹配每个核心ID对应的上下文）
+            core_context_map = {}
+            for core_id in core_ids:
+                # 重新计算当前核心ID的前limit个ID（保证顺序）
+                core_target_ids = [core_id - i for i in range(1, limit + 1)]
+                # 过滤有效ID + 从context_id_map中取值 + 按local_id升序
+                core_context = []
+                for target_id in core_target_ids:
+                    if target_id > 0 and target_id in context_id_map:
+                        core_context.append(context_id_map[target_id])
+                # 按local_id升序（保证上下文顺序正确）
+                core_context.sort(key=lambda x: x["local_id"])
+                core_context_map[core_id] = core_context
+
+            logger.debug(
+                f"📥 批量上下文查询完成：表名={table_name} | 核心ID={core_ids} | "
+                f"查询上下文ID={valid_context_ids} | 实际命中={len(all_context_records)}条"
+            )
+            return core_context_map
+
+        except Exception as e:
+            logger.error(
+                f"❌ 批量上下文查询失败：表名={table_name} | 核心ID={core_ids} | 错误={str(e)}",
+                exc_info=True
+            )
+            # 异常时返回空上下文，不中断业务
+            return {core_id: [] for core_id in core_ids}
 
 
     async def _test_db_connection(self) -> None:

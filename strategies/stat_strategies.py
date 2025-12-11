@@ -8,7 +8,7 @@ from exceptions import ContactNotFoundError, TargetTableNotFoundError
 from parser import AppConfig
 from services import ContactDBService, ChatRecordDBService
 from utils import SQLBuilder
-from .stat_models import ContactRecord, ChatRecord, StrategyResult
+from .stat_models import ContactRecord, ChatRecord, StrategyResult, BacktrackedRecord
 
 logger = logging.getLogger(__name__)
 
@@ -27,30 +27,27 @@ class StatStrategy(ABC):
         # 缓存：映射关系（表名→联系人信息）
         self.mapping_cache: Dict[str, ContactRecord] = {}
         # 缓存：表处理结果（后续步骤复用）
-        self.process_result: Dict[str, ChatRecord] = {}
+        self.process_result: Dict[str, List[ChatRecord]] = {}
+        # 缓存：回溯表记录结果
+        self.backtracked_record: Dict[str, List[BacktrackedRecord]] = {}
         # 缓存：带上下文的核心记录
         self.context_result: Dict[str, List[Dict[str, any]]] = {}
 
-    async def run(self) -> StrategyResult:
+    # async def run(self) -> StrategyResult:
+    async def run(self) -> None:
         """策略执行入口（统一串联所有步骤，无需重写）"""
         # 步骤1：获取映射关系
-        self._associate_mapping()
+        self.mapping_cache = self._associate_mapping()
         # 步骤2：获取待处理表
         pending_tables = await self._get_pending_tables()
         # 步骤3：处理表数据
         self.process_result = await self._process_tables(pending_tables)
         # 步骤4：回溯上下文
-        self._backtrack_context()
+        self.backtracked_record = await self._backtrack_context()
         # 步骤5：聚合统计
-        return self._aggregate_stat()
-
-
-    @abstractmethod
-    def _backtrack_context(self) -> None:
-        """步骤4：回溯核心记录的上两条上下文
-        处理self.process_result，补充上下文后存入self.context_result
-        """
+        # return self._aggregate_stat()
         pass
+
 
     @abstractmethod
     def _aggregate_stat(self) -> StrategyResult:
@@ -60,10 +57,12 @@ class StatStrategy(ABC):
         """
         pass
 
-    def _associate_mapping(self) -> None:
+    def _associate_mapping(self) -> Dict[str, ContactRecord]:
         """
             步骤1：预获取目标的全量映射（remark/nick_name→username→MD5→表名）
         """
+
+        associate_mapping: Dict[str, ContactRecord] = {}
 
         # 1. 从配置读取目标值（无需区分match_type，仅读目标值）
         target_value = self.app_config.stat_mode.target_contact_list  # 仅读取目标匹配值
@@ -111,7 +110,7 @@ class StatStrategy(ABC):
                 contact_type = "unknown"  # 未知类型（兜底）
 
             # 3.3 存入映射缓存（表名→联系人信息，自动覆盖重复key）
-            self.mapping_cache[target_table_name] = ContactRecord(
+            associate_mapping[target_table_name] = ContactRecord(
                 username=username,
                 nickname=contact_name,
                 type=contact_type,
@@ -126,7 +125,7 @@ class StatStrategy(ABC):
                 f"生成目标表名：{target_table_name}"
             )
 
-        # ========== 仅新增未匹配日志（对齐_get_pending_tables风格） ==========
+        # ========== 未匹配日志（对齐_get_pending_tables风格） ==========
         if unmatched_config_values:
             for val in unmatched_config_values:
                 logger.warning(f"⚠️ 配置值[{val}]未在联系人表中匹配到对应的联系人/群聊")
@@ -137,6 +136,8 @@ class StatStrategy(ABC):
             f"未匹配的配置值数量：{len(unmatched_config_values)} | "
             f"缓存表名数量：{len(self.mapping_cache)}"
         )
+
+        return associate_mapping
 
 
     async def _get_pending_tables(self) -> List[str]:
@@ -251,3 +252,68 @@ class StatStrategy(ABC):
             logger.info(f"📊 处理表完成：表名={table_name} | 有效记录数={len(chat_records)}")
 
         return table_chat_records
+
+
+    async def _backtrack_context(self) -> Dict[
+        str, List[BacktrackedRecord]]:
+        """
+            步骤4：回溯核心记录的上两条上下文
+            按表批量追溯上下文：同表的核心记录一次查询，减少DB调用
+            :return: 表名→带上下文的BacktrackedRecord列表
+        """
+
+        backtrack_result: Dict[str, List[BacktrackedRecord]] = {}
+        total_core_records = sum(len(records) for records in self.process_result.values())
+
+        # 日志埋点（贴合你的风格）
+        logger.info(
+            f"🔍 开始批量追溯上下文：待处理表数={len(self.process_result)} | 核心记录总数={total_core_records} | 每条追溯前2条")
+
+        # 遍历每个表，批量处理
+        for table_name, core_records in self.process_result.items():
+            # 1. 提取当前表的所有核心local_id（用于批量查询）
+            core_local_ids = [rec.local_id for rec in core_records]
+            # 2. 批量查询当前表所有核心ID的上下文（仅1次DB调用）
+            core_context_map = await self.chat_db_service.get_batch_context_records_by_local_ids(
+                table_name=table_name,
+                core_local_id_set=core_local_ids
+            )
+
+            # 3. 构建BacktrackedRecord
+            backtrack_records = []
+            for core_record in core_records:
+                # 获取当前核心记录的上下文（已按ID升序）
+                context_raw = core_context_map[core_record.local_id]
+                # 转换为ChatRecord（和核心记录结构一致）
+                context_records = [
+                    ChatRecord(
+                        local_id=raw["local_id"],
+                        message_content=raw["message_content"],
+                        real_sender_id=raw["real_sender_id"],
+                        create_time=datetime.datetime.fromtimestamp(raw["create_time"]),
+                        matched_phrases=[]  # 上下文无需匹配口头禅
+                    ) for raw in context_raw
+                ]
+
+                # 封装为BacktrackedRecord
+                backtrack_record = BacktrackedRecord(
+                    core_record=core_record,
+                    context_records=context_records,
+                    context_count=len(context_records),
+                    table_name=table_name
+                )
+                backtrack_records.append(backtrack_record)
+
+            # 4. 存入结果
+            backtrack_result[table_name] = backtrack_records
+        #     logger.debug(
+        #         f"📊 表上下文追溯完成：表名={table_name} | 处理核心记录数={len(core_records)} | "
+        #         f"平均每条追溯{sum(len(v) for v in core_context_map.values()) / len(core_records):.1f}条"
+        #     )
+        #
+        # # 完成日志
+        # logger.info(
+        #     f"✅ 上下文追溯完成：处理表数={len(backtrack_result)} | "
+        #     f"总带上下文记录数={sum(len(v) for v in backtrack_result.values())}"
+        # )
+        return backtrack_result

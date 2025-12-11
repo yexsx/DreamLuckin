@@ -60,9 +60,9 @@ class SelfToTargetStrategy(StatStrategy):
         # # 4. 返回统一格式的处理结果
         # return {target_table_name: core_records}
 
-    def _backtrack_context(self) -> None:
-        """步骤4：回溯核心记录的上两条纯文字上下文"""
-        pass
+    # def _backtrack_context(self) -> None:
+    #     """步骤4：回溯核心记录的上两条纯文字上下文"""
+        # pass
         # target_table_name = list(self.process_result.keys())[0]
         # core_records = self.process_result[target_table_name]
         # context_records_list: List[Dict[str, Any]] = []
