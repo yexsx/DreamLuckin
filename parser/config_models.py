@@ -45,7 +45,9 @@ class PetPhraseConfig:
     # whole_word_match: bool = False  # 是否全词匹配
     match_type: str  # contains / exact
     # ignore_emoji_space: bool = True  # 是否忽略表情和空格
-    context_backtrack_limit: int = 3
+    # context_backtrack_limit: int = 3
+    context_front_limit: int = 2
+    context_end_limit:int = 2
 
 
 # ------------------------------

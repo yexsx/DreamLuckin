@@ -233,16 +233,38 @@ class ConfigParser:
                 f"pet_phrase_config.match_type 有效值为{valid_match_types}，当前值：{match_type}"
             )
 
-        # ========== 3. context_backtrack_limit 校验（原有逻辑不变） ==========
-        context_backtrack_limit = pet_phrase_dict.get("context_backtrack_limit", 10)  # 默认值10
+        # ========== 3. context_front_limit 校验（原有逻辑不变） ==========
+        context_front_limit = pet_phrase_dict.get("context_front_limit", 2)
         # 3.1 校验类型（必须是整数）
-        if not isinstance(context_backtrack_limit, int):
-            raise InvalidTypeError("db_config.context_backtrack_limit 必须是整数类型")
-        # 3.2 校验取值范围（必须大于0，且不超过20）
-        if context_backtrack_limit < -10:
-            raise InvalidValueError("db_config.context_backtrack_limit 最小不能超过-10")
-        if context_backtrack_limit > 10:
-            raise InvalidValueError("db_config.context_backtrack_limit 最大不能超过10")
+        if not isinstance(context_front_limit, int):
+            raise InvalidTypeError("db_config.context_front_limit 必须是整数类型")
+        # 3.2 校验取值范围（必须大于0，且不超过10）
+        if context_front_limit < 0:
+            raise InvalidValueError("db_config.context_front_limit 不能为负数")
+        if context_front_limit > 10:
+            raise InvalidValueError("db_config.context_front_limit 最大不能超过10")
+
+        # ========== 3. context_last_limit 校验（原有逻辑不变） ==========
+        context_last_limit = pet_phrase_dict.get("context_last_limit", 2)
+        # 3.1 校验类型（必须是整数）
+        if not isinstance(context_last_limit, int):
+            raise InvalidTypeError("db_config.context_last_limit 必须是整数类型")
+        # 3.2 校验取值范围（必须大于0，且不超过10）
+        if context_last_limit < 0:
+            raise InvalidValueError("db_config.context_last_limit 不能为负数")
+        if context_last_limit > 10:
+            raise InvalidValueError("db_config.context_last_limit 最大不能超过10")
+
+        # # ========== 3. context_backtrack_limit 校验（原有逻辑不变） ==========
+        # context_backtrack_limit = pet_phrase_dict.get("context_backtrack_limit", 10)  # 默认值10
+        # # 3.1 校验类型（必须是整数）
+        # if not isinstance(context_backtrack_limit, int):
+        #     raise InvalidTypeError("db_config.context_backtrack_limit 必须是整数类型")
+        # # 3.2 校验取值范围（必须大于0，且不超过20）
+        # if context_backtrack_limit < -10:
+        #     raise InvalidValueError("db_config.context_backtrack_limit 最小不能超过-10")
+        # if context_backtrack_limit > 10:
+        #     raise InvalidValueError("db_config.context_backtrack_limit 最大不能超过10")
 
         # 布尔型参数校验（默认False/True）
         # case_sensitive = pet_phrase_dict.get("case_sensitive", False)

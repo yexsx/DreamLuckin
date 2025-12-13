@@ -89,7 +89,7 @@ async def main():
         if ContactDBService.get_instance():
             ContactDBService.get_instance().close()
         if await ChatRecordDBService.get_connection():
-            ChatRecordDBService.close_pool().close()
+            await ChatRecordDBService.close_pool()
         logger.info("===== 聊天记录统计程序结束 =====")
 
 
@@ -112,8 +112,13 @@ if __name__ == "__main__":
 # o 10.业务类必要方法实现协程
 # × 11.未过滤群聊的精确搜索
 # √ 12.联系人类型枚举
-# o 13.实现_backtrack_context
+# √ 13.实现_backtrack_context
 # √ 14.create_time时间戳转换
-# o 15.完成群聊wxid翻译
+# √ 15.完成群聊wxid翻译
 # √ 16.重构table_chat_records结构,local_id为key的字典
 # √ 17.聊天记录数据库已改成对象池模式
+# o 18.结果分析转换成json
+# o 19.对象池导致的程序终止需要两次
+# o 20.对象输出方法简化封装好
+# o 21.整理utils文件夹
+
