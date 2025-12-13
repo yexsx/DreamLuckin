@@ -1,6 +1,7 @@
 from dataclasses import dataclass
 from datetime import datetime
 from typing import List
+from .analyzer_enums import ContactType
 
 
 @dataclass
@@ -8,8 +9,8 @@ class ContactRecord:
     """映射缓存的单个联系人/群聊缓存对象（替代原嵌套字典）"""
     username: str          # 联系人username
     nickname: str          # 联系人昵称（remark/nick_name）
-    type: str      # 类型：friend/group/group_friend/unknown（原type字段，避免关键字冲突）
-    type_code: int         # 原始local_type值（1/2/3）
+    type: ContactType      # 类型：friend/group/group_friend/unknown（原type字段，避免关键字冲突）
+    # type_code: int         # 原始local_type值（1/2/3）
 
 
 @dataclass
@@ -18,7 +19,8 @@ class ChatRecord:
     local_id: int               # 自增主键
     message_content: str        # 纯文字聊天内容
     real_sender_id: int         # 发送者ID（1=自己，其他=好友/群友）
-    create_time: datetime            # 发送时间戳（秒级）
+    create_time: int            # 时间戳
+    create_time_format: datetime            # 格式化时间
     matched_phrases: List[str]  # 命中的口头禅列表
 
 

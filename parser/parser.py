@@ -79,10 +79,34 @@ class ConfigParser:
         if max_concurrency > 20:
             raise InvalidValueError("db_config.max_concurrency 最大不能超过20（避免数据库压力过大）")
 
+        # ========== 4. pool_min_connections,pool_max_connections 校验 ==========
+        pool_min_connections = db_config_dict.get("pool_min_connections", 4)  # 默认值4
+        pool_max_connections = db_config_dict.get("pool_max_connections", 10)  # 默认值10
+
+        # 4.1 校验类型（必须是整数）
+        if not isinstance(pool_min_connections, int):
+            raise InvalidTypeError("db_config.pool_min_connections 必须是整数类型")
+        # 4.2 校验取值范围（必须大于4，且不超过最大连接数）
+        if pool_min_connections <= 4:
+            raise InvalidValueError("db_config.pool_min_connections 必须大于4")
+        if pool_min_connections > pool_max_connections:
+            raise InvalidValueError("db_config.pool_min_connections 最大不能超过最大连接数量（避免对象资源浪费）")
+
+        # 4.1 校验类型（必须是整数）
+        if not isinstance(pool_max_connections, int):
+            raise InvalidTypeError("db_config.pool_max_connections 必须是整数类型")
+        # 4.2 校验取值范围（必须大于最小连接数量，且不超过24）
+        if pool_max_connections < pool_min_connections:
+            raise InvalidValueError("db_config.pool_max_connections 必须大于最小连接数量")
+        if pool_max_connections >= 24:
+            raise InvalidValueError("db_config.pool_max_connections 最大不能超过24（太多会造成锁竞争）")
+
         return DBConfig(
             chat_db_path=chat_db_path,
             contact_db_path=contact_db_path,
-            max_concurrency=max_concurrency
+            max_concurrency=max_concurrency,
+            pool_min_connections=pool_min_connections,
+            pool_max_connections=pool_max_connections
         )
 
 
@@ -208,6 +232,17 @@ class ConfigParser:
             raise InvalidValueError(
                 f"pet_phrase_config.match_type 有效值为{valid_match_types}，当前值：{match_type}"
             )
+
+        # ========== 3. context_backtrack_limit 校验（原有逻辑不变） ==========
+        context_backtrack_limit = pet_phrase_dict.get("context_backtrack_limit", 10)  # 默认值10
+        # 3.1 校验类型（必须是整数）
+        if not isinstance(context_backtrack_limit, int):
+            raise InvalidTypeError("db_config.context_backtrack_limit 必须是整数类型")
+        # 3.2 校验取值范围（必须大于0，且不超过20）
+        if context_backtrack_limit < -10:
+            raise InvalidValueError("db_config.context_backtrack_limit 最小不能超过-10")
+        if context_backtrack_limit > 10:
+            raise InvalidValueError("db_config.context_backtrack_limit 最大不能超过10")
 
         # 布尔型参数校验（默认False/True）
         # case_sensitive = pet_phrase_dict.get("case_sensitive", False)

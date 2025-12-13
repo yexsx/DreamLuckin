@@ -1,37 +1,33 @@
 import datetime
 import hashlib
 import logging
-from abc import ABC, abstractmethod
 from typing import Dict, List
 
 from exceptions import ContactNotFoundError, TargetTableNotFoundError
 from parser import AppConfig
 from services import ContactDBService, ChatRecordDBService
 from utils import SQLBuilder
-from .stat_models import ContactRecord, ChatRecord, StrategyResult, BacktrackedRecord
+from .analyzer_models import ContactRecord, ChatRecord, StrategyResult, BacktrackedRecord
+from .analyzer_enums import ContactType
 
 logger = logging.getLogger(__name__)
 
-class StatStrategy(ABC):
-    """统计策略抽象接口类（所有策略的基类）"""
+class ChatRecordAnalyzer:
+    """聊天记录分析器（核心业务类）"""
 
     def __init__(
             self,
-            chat_db_service: ChatRecordDBService,  # 聊天记录DB服务实例（LuckyChatDBService）
-            contact_db_service: ContactDBService,  # 联系人DB服务实例（ContactDBService）
             app_config: AppConfig  # 全局配置实例（AppConfig）
     ):
-        self.chat_db_service = chat_db_service
-        self.contact_db_service = contact_db_service
         self.app_config = app_config
         # 缓存：映射关系（表名→联系人信息）
         self.mapping_cache: Dict[str, ContactRecord] = {}
         # 缓存：表处理结果（后续步骤复用）
-        self.process_result: Dict[str, List[ChatRecord]] = {}
+        self.process_result: Dict[str, Dict[int, ChatRecord]] = {}
         # 缓存：回溯表记录结果
-        self.backtracked_record: Dict[str, List[BacktrackedRecord]] = {}
+        self.backtracked_record: Dict[str, Dict[int, List[ChatRecord]]] = {}
         # 缓存：带上下文的核心记录
-        self.context_result: Dict[str, List[Dict[str, any]]] = {}
+        # self.context_result: Dict[str, List[Dict[str, any]]] = {}
 
     # async def run(self) -> StrategyResult:
     async def run(self) -> None:
@@ -49,7 +45,7 @@ class StatStrategy(ABC):
         pass
 
 
-    @abstractmethod
+    # @abstractmethod
     def _aggregate_stat(self) -> StrategyResult:
         """步骤5：按维度聚合统计
         返回：
@@ -72,7 +68,7 @@ class StatStrategy(ABC):
         logger.info(f"🔍 开始查询联系人：目标值列表={target_value} | 过滤群聊={filter_group_chat}")
 
         # 2. 精准查询contact表（同时匹配remark和nick_name，OR条件）
-        contact_result = self.contact_db_service.get_contacts(target_value, filter_group_chat)
+        contact_result = ContactDBService.get_contacts(target_value, filter_group_chat)
 
         # 校验结果数量：0条报错
         if len(contact_result) == 0:
@@ -100,21 +96,14 @@ class StatStrategy(ABC):
             contact_name = contact_info["remark"] or contact_info["nick_name"] or "未知联系人"
 
             local_type = contact_info["local_type"]
-            if local_type == 1:
-                contact_type = "friend"  # 好友
-            elif local_type == 2:
-                contact_type = "group"  # 群聊
-            elif local_type == 3:
-                contact_type = "group_friend"  # 群友（没加过的）
-            else:
-                contact_type = "unknown"  # 未知类型（兜底）
+            contact_type = ContactType.get_type_by_local_type_id(local_type)
 
             # 3.3 存入映射缓存（表名→联系人信息，自动覆盖重复key）
             associate_mapping[target_table_name] = ContactRecord(
                 username=username,
                 nickname=contact_name,
-                type=contact_type,
-                type_code=contact_info["local_type"]  # 对应原字典的type_code
+                type=contact_type
+                # type_code=contact_info["local_type"]  # 对应原字典的type_code
             )
 
             logger.info(
@@ -134,7 +123,7 @@ class StatStrategy(ABC):
             f"✅ 【映射缓存汇总】配置目标值总数：{len(target_value)} | "
             f"匹配到联系人数量：{len(contact_result)} | "
             f"未匹配的配置值数量：{len(unmatched_config_values)} | "
-            f"缓存表名数量：{len(self.mapping_cache)}"
+            f"缓存表名数量：{len(associate_mapping)}"
         )
 
         return associate_mapping
@@ -151,21 +140,20 @@ class StatStrategy(ABC):
         total_pending = len(pending_table_names)
 
         # 2,调用封装方法批量校验表存在性（name IN 逻辑）
-        table_seq_dict = await self.chat_db_service.check_tables_exist(pending_table_names)
+        table_seq_dict = await ChatRecordDBService.check_tables_exist(pending_table_names)
 
-        # 3,分情况处理表存在性逻辑
-        valid_tables = []
+        # 3,先单独收集缺失的表（不影响排序，改动1）
         missing_contacts = []
         for table_name in pending_table_names:
-            # 表不存在→记录缺失的联系人信息
             if table_name not in table_seq_dict:
                 contact_info = self.mapping_cache[table_name]
                 missing_contacts.append(
                     f"联系人[{contact_info.nickname}](类型：{contact_info.type})的聊天记录表[{table_name}]缺失"
                 )
-                continue
 
-            # 表存在→输出日志（含总记录数）
+        # 4,遍历table_seq_dict.keys()（已排序）收集有效表（核心改动2）
+        valid_tables = []
+        for table_name in table_seq_dict.keys():  # 替换原遍历pending_table_names
             total_records = table_seq_dict[table_name]
             contact_info = self.mapping_cache[table_name]
             logger.info(
@@ -198,7 +186,7 @@ class StatStrategy(ABC):
         return valid_tables
 
 
-    async def _process_tables(self, pending_tables: List[str]) -> dict[str, list[ChatRecord]]:
+    async def _process_tables(self, pending_tables: List[str]) -> Dict[str, Dict[int, ChatRecord]]:
         """
             步骤3：处理表数据（协程）
             参数：
@@ -207,14 +195,16 @@ class StatStrategy(ABC):
                 Dict[str, list[ChatRecord]]：{表名: 聊天记录列表}
         """
 
-        table_chat_records: Dict[str, List[ChatRecord]] = {}
-
+        table_chat_records: Dict[str, Dict[int, ChatRecord]] = {}
         pet_phrase_config = self.app_config.pet_phrase_config
+        max_concurrency = self.app_config.db_config.max_concurrency
 
         # 1. 构建时间条件（所有表共用）
         time_condition = SQLBuilder.build_time_condition(self.app_config.time_config)
         # 2. 构建口头禅条件+参数（所有表共用）
         phrase_condition, phrase_params = SQLBuilder.build_phrase_condition(pet_phrase_config)
+        # 3. 构建命中关键词列表别名
+        match_keywords_sql, match_params = SQLBuilder.build_match_keywords_sql(pet_phrase_config)
 
         logger.info(
             f"🔧 构建公共查询条件：待处理表数={len(pending_tables)} | "
@@ -225,31 +215,38 @@ class StatStrategy(ABC):
 
         for table_name in pending_tables:
             # 1. 调用DB服务获取原始记录（字典列表）
-            raw_records = await self.chat_db_service.get_chat_records_by_phrase_and_time(
+            raw_records = await ChatRecordDBService.get_chat_records_by_phrase_and_time(
                 table_name=table_name,
                 phrase_condition=phrase_condition,
                 phrase_params=phrase_params,
+                match_keywords_sql=match_keywords_sql,
+                match_params=match_params,
                 time_condition=time_condition,
-                only_self_msg=self.app_config.stat_mode.mode_type is not "target_to_self"
+                only_self_msg=self.app_config.stat_mode.mode_type != "target_to_self"
             )
 
-            # 2. 转换为ChatRecord对象（核心：字典→结构化类）
-            chat_records = []
+            # 2. 转换为ChatRecord对象（核心：字典→结构化类，改为local_id为key的dict）
+            chat_records = {}  # 初始化改为字典，替代列表
             for raw in raw_records:
                 # 匹配ChatRecord字段，补充matched_phrases（空列表兜底）
+
+                raw_create_time = raw["create_time"]
+                raw_matched_phrases = raw["matched_phrases"]
+
                 chat_record = ChatRecord(
                     local_id=raw["local_id"],
                     message_content=raw["message_content"],
                     real_sender_id=raw["real_sender_id"],
-                    create_time=datetime.datetime.fromtimestamp(raw["create_time"]),
-                    matched_phrases=raw.get("matched_phrases", [])  # 若DB返回已匹配则直接用，否则空列表
+                    create_time=raw_create_time,
+                    create_time_format=datetime.datetime.fromtimestamp(raw_create_time) if raw_create_time else None,
+                    matched_phrases=raw_matched_phrases.split(',') if raw_matched_phrases and raw_matched_phrases.strip() else []
                 )
-                chat_records.append(chat_record)
+                chat_records[chat_record.local_id] = chat_record  # 以local_id为key存入字典
 
             # 3. 存入结果字典
             table_chat_records[table_name] = chat_records
 
-            logger.info(f"📊 处理表完成：表名={table_name} | 有效记录数={len(chat_records)}")
+            logger.info(f"📊 处理表完成：表名={table_name} | 有效记录数={len(chat_records.keys())}")
 
         return table_chat_records
 
@@ -261,59 +258,59 @@ class StatStrategy(ABC):
             按表批量追溯上下文：同表的核心记录一次查询，减少DB调用
             :return: 表名→带上下文的BacktrackedRecord列表
         """
-
-        backtrack_result: Dict[str, List[BacktrackedRecord]] = {}
-        total_core_records = sum(len(records) for records in self.process_result.values())
-
-        # 日志埋点（贴合你的风格）
-        logger.info(
-            f"🔍 开始批量追溯上下文：待处理表数={len(self.process_result)} | 核心记录总数={total_core_records} | 每条追溯前2条")
-
-        # 遍历每个表，批量处理
-        for table_name, core_records in self.process_result.items():
-            # 1. 提取当前表的所有核心local_id（用于批量查询）
-            core_local_ids = [rec.local_id for rec in core_records]
-            # 2. 批量查询当前表所有核心ID的上下文（仅1次DB调用）
-            core_context_map = await self.chat_db_service.get_batch_context_records_by_local_ids(
-                table_name=table_name,
-                core_local_id_set=core_local_ids
-            )
-
-            # 3. 构建BacktrackedRecord
-            backtrack_records = []
-            for core_record in core_records:
-                # 获取当前核心记录的上下文（已按ID升序）
-                context_raw = core_context_map[core_record.local_id]
-                # 转换为ChatRecord（和核心记录结构一致）
-                context_records = [
-                    ChatRecord(
-                        local_id=raw["local_id"],
-                        message_content=raw["message_content"],
-                        real_sender_id=raw["real_sender_id"],
-                        create_time=datetime.datetime.fromtimestamp(raw["create_time"]),
-                        matched_phrases=[]  # 上下文无需匹配口头禅
-                    ) for raw in context_raw
-                ]
-
-                # 封装为BacktrackedRecord
-                backtrack_record = BacktrackedRecord(
-                    core_record=core_record,
-                    context_records=context_records,
-                    context_count=len(context_records),
-                    table_name=table_name
-                )
-                backtrack_records.append(backtrack_record)
-
-            # 4. 存入结果
-            backtrack_result[table_name] = backtrack_records
-        #     logger.debug(
-        #         f"📊 表上下文追溯完成：表名={table_name} | 处理核心记录数={len(core_records)} | "
-        #         f"平均每条追溯{sum(len(v) for v in core_context_map.values()) / len(core_records):.1f}条"
+        pass
+        # backtrack_result: Dict[str, List[BacktrackedRecord]] = {}
+        # total_core_records = sum(len(records) for records in self.process_result.values())
+        #
+        # # 日志埋点（贴合你的风格）
+        # logger.info(
+        #     f"🔍 开始批量追溯上下文：待处理表数={len(self.process_result)} | 核心记录总数={total_core_records} | 每条追溯前2条")
+        #
+        # # 遍历每个表，批量处理
+        # for table_name, core_records in self.process_result.items():
+        #     # 1. 提取当前表的所有核心local_id（用于批量查询）
+        #     core_local_ids = [rec.local_id for rec in core_records]
+        #     # 2. 批量查询当前表所有核心ID的上下文（仅1次DB调用）
+        #     core_context_map = await self.chat_db_service.get_batch_context_records_by_local_ids(
+        #         table_name=table_name,
+        #         core_local_id_set=core_local_ids
         #     )
         #
-        # # 完成日志
-        # logger.info(
-        #     f"✅ 上下文追溯完成：处理表数={len(backtrack_result)} | "
-        #     f"总带上下文记录数={sum(len(v) for v in backtrack_result.values())}"
-        # )
-        return backtrack_result
+        #     # 3. 构建BacktrackedRecord
+        #     backtrack_records = []
+        #     for core_record in core_records:
+        #         # 获取当前核心记录的上下文（已按ID升序）
+        #         context_raw = core_context_map[core_record.local_id]
+        #         # 转换为ChatRecord（和核心记录结构一致）
+        #         context_records = [
+        #             ChatRecord(
+        #                 local_id=raw["local_id"],
+        #                 message_content=raw["message_content"],
+        #                 real_sender_id=raw["real_sender_id"],
+        #                 create_time=datetime.datetime.fromtimestamp(raw["create_time"]),
+        #                 matched_phrases=[]  # 上下文无需匹配口头禅
+        #             ) for raw in context_raw
+        #         ]
+        #
+        #         # 封装为BacktrackedRecord
+        #         backtrack_record = BacktrackedRecord(
+        #             core_record=core_record,
+        #             context_records=context_records,
+        #             context_count=len(context_records),
+        #             table_name=table_name
+        #         )
+        #         backtrack_records.append(backtrack_record)
+        #
+        #     # 4. 存入结果
+        #     backtrack_result[table_name] = backtrack_records
+        # #     logger.debug(
+        # #         f"📊 表上下文追溯完成：表名={table_name} | 处理核心记录数={len(core_records)} | "
+        # #         f"平均每条追溯{sum(len(v) for v in core_context_map.values()) / len(core_records):.1f}条"
+        # #     )
+        # #
+        # # # 完成日志
+        # # logger.info(
+        # #     f"✅ 上下文追溯完成：处理表数={len(backtrack_result)} | "
+        # #     f"总带上下文记录数={sum(len(v) for v in backtrack_result.values())}"
+        # # )
+        # return backtrack_result

@@ -10,6 +10,8 @@ class DBConfig:
     chat_db_path: str  # 数据库文件路径（如 "Message.db"）
     contact_db_path: str  # 数据库文件路径（如 "Contact.db"）
     max_concurrency: int = 10  # 协程最大并发数
+    pool_min_connections: int = 4  # 协程最大并发数
+    pool_max_connections: int = 10  # 协程最大并发数
 
 
 # ------------------------------
@@ -43,6 +45,7 @@ class PetPhraseConfig:
     # whole_word_match: bool = False  # 是否全词匹配
     match_type: str  # contains / exact
     # ignore_emoji_space: bool = True  # 是否忽略表情和空格
+    context_backtrack_limit: int = 3
 
 
 # ------------------------------

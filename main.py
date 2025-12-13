@@ -3,15 +3,9 @@ import logging
 import sys
 
 # ====================== 1. 全局日志配置 ======================
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-    datefmt="%Y-%m-%d %H:%M:%S",
-    handlers=[
-        logging.StreamHandler(sys.stdout),
-        logging.FileHandler("./log/chat_stat.log", encoding="utf-8")
-    ]
-)
+from log.log_config import setup_global_logging
+
+setup_global_logging()
 logger = logging.getLogger(__name__)
 
 # ====================== 2. 导入自定义模块 ======================
@@ -20,13 +14,11 @@ from parser import AppConfig, ConfigParser  # 统一的应用配置模型（包�
 # 数据库服务相关
 from services import ContactDBService,ChatRecordDBService
 # 异常相关
-from exceptions import ParseBaseError, LuckyChatDBError, StatBaseException
+from exceptions import ParseBaseError, LuckyChatDBError, AnalyzerBaseException
 # # 策略工厂 + 接口
-from strategies import StatStrategyFactory
+from chat_analyzer import ChatRecordAnalyzer
 # 导入配置加载门面类
 from utils import ConfigLoader
-
-
 
 # ====================== 3. 核心异步主函数 ======================
 async def main():
@@ -44,33 +36,30 @@ async def main():
 
         # -------------------------- 步骤2：初始化数据库 --------------------------
         logger.info("【步骤2/4】开始初始化数据库服务")
-        # 初始化聊天记录DB
-        await ChatRecordDBService.init_instance(app_config.db_config.chat_db_path)
-        chat_db_service = ChatRecordDBService.get_instance()
-        logger.info(f"✅ 聊天记录异步数据库初始化成功（路径：{app_config.db_config.chat_db_path}）")
+        # 初始化聊天记录DB对象池
+        await ChatRecordDBService.init_pool(
+            db_path=app_config.db_config.chat_db_path,  # 替换为实际数据库路径
+            max_connections=10,
+            min_connections=3
+        )
+        logger.info(f"✅ 聊天记录异步数据对象池初始化成功（路径：{app_config.db_config.chat_db_path}）")
 
-        # 初始化联系人DB
+        # 初始化联系人DB单例
         ContactDBService.init_instance(app_config.db_config.contact_db_path)
-        contact_db_service = ContactDBService.get_instance()
-        logger.info(f"✅ 联系人同步数据库初始化成功（路径：{app_config.db_config.contact_db_path}）")
+        logger.info(f"✅ 联系人同步单例数据库初始化成功（路径：{app_config.db_config.contact_db_path}）")
         logger.info("【步骤2/4】数据库服务初始化完成")
 
         # -------------------------- 步骤3：工厂创建策略实例 --------------------------
-        logger.info("【步骤3/4】开始创建统计策略实例")
-        # 工厂方法根据mode_type创建对应策略
-        strategy = StatStrategyFactory.create_strategy(
-            mode_type=app_config.stat_mode.mode_type,
-            chat_db_service=chat_db_service,
-            contact_db_service=contact_db_service,
-            app_config=app_config
-        )
-        logger.info(f"✅ 成功创建[{app_config.stat_mode.mode_type}]策略实例")
+        logger.info("【步骤3/4】开始创建聊天记录分析实例")
 
+        analyzer = ChatRecordAnalyzer(app_config=app_config)
+
+        logger.info(f"✅ 成功创建聊天记录分析实例")
         # -------------------------- 步骤4：执行策略 --------------------------
         logger.info("【步骤4/4】开始执行统计策略")
-        stat_result = await strategy.run()  # 异步执行策略
+        analyzer_result = await analyzer.run()  # 异步执行策略
         logger.info("✅ 统计策略执行完成")
-        logger.info(f"【最终统计结果】\n{stat_result}")
+        logger.info(f"【最终统计结果】\n{analyzer_result}")
 
         # -------------------------- 可选：导出结果 --------------------------
         # 按output_config导出结果（示例）
@@ -79,13 +68,17 @@ async def main():
         #     json.dump(stat_result, f, ensure_ascii=False, indent=2)
         # logger.info(f"✅ 统计结果已导出至：{export_path}")
 
+    except KeyboardInterrupt:
+        logger.info("⚠️ 程序被手动终止")
+        ContactDBService.close()  # 释放资源
+        sys.exit(1)
     except ParseBaseError as e:
         logger.error(f"【配置解析/读取失败】{e}", exc_info=True)
         sys.exit(1)
     except LuckyChatDBError as e:
         logger.error(f"【数据库初始化失败】{e}", exc_info=True)
         sys.exit(1)
-    except StatBaseException as e:
+    except AnalyzerBaseException as e:
         logger.error(f"【统计策略执行失败】{e}", exc_info=True)
         sys.exit(1)
     except Exception as e:
@@ -95,8 +88,8 @@ async def main():
         # 关闭数据库连接
         if ContactDBService.get_instance():
             ContactDBService.get_instance().close()
-        if ChatRecordDBService.get_instance():
-            await ChatRecordDBService.get_instance().close()
+        if await ChatRecordDBService.get_connection():
+            ChatRecordDBService.close_pool().close()
         logger.info("===== 聊天记录统计程序结束 =====")
 
 
@@ -107,17 +100,20 @@ if __name__ == "__main__":
 
 
 # TODO
-# 1.数据库启动检验是否正确，有concat或message √
-# 2.策略实现类封装sql方法到服务类 √
-# 3.main方法读取文件封装工具类 √
-# 4.实现策略类自定义业务异常 √
-# 5.main的日志方法优化
-# 6.sql_builder逻辑实现 √
-# 7.selfToTarget子类实现 ×
-# 8.策略接口变成具体实现类
-# 9.待处理列表从高到低排
-# 10.业务类必要方法实现协程
-# 11.未过滤群聊的精确搜索
-# 12.联系人类型枚举
-# 13.实现_backtrack_context
-# 14.create_time时间戳转换
+# √ 1.数据库启动检验是否正确，有concat或message
+# √ 2.策略实现类封装sql方法到服务类
+# √ 3.main方法读取文件封装工具类
+# √ 4.实现策略类自定义业务异常
+# √ 5.main的日志方法优化
+# √ 6.sql_builder逻辑实现
+# × 7.selfToTarget子类实现
+# √ 8.策略接口变成具体实现类
+# √ 9.待处理列表从高到低排
+# o 10.业务类必要方法实现协程
+# × 11.未过滤群聊的精确搜索
+# √ 12.联系人类型枚举
+# o 13.实现_backtrack_context
+# √ 14.create_time时间戳转换
+# o 15.完成群聊wxid翻译
+# √ 16.重构table_chat_records结构,local_id为key的字典
+# √ 17.聊天记录数据库已改成对象池模式

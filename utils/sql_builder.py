@@ -1,8 +1,7 @@
-import re
-from typing import List, Tuple
+import datetime
+from typing import Tuple
 
 from parser import TimeConfig, PetPhraseConfig
-import datetime
 
 
 class SQLBuilder:
@@ -65,3 +64,37 @@ class SQLBuilder:
         # 多关键词用OR连接，包裹括号避免优先级问题
         condition_str = f"({' OR '.join(phrase_conditions)})"
         return condition_str, tuple(phrase_params)
+
+
+    # 生成 match_keywords 的 CASE WHEN SQL 片段 + 参数
+    @staticmethod
+    def build_match_keywords_sql(pet_phrase_config: PetPhraseConfig) -> Tuple[str, tuple]:
+        """
+        生成 SELECT 子句中「命中关键词拼接」的 SQL 片段 + 对应参数
+        :param pet_phrase_config: 已校验的口头禅配置
+        :return: (match_keywords的SQL片段, 参数元组)；无关键词时返回("", ())
+        """
+        phrases = pet_phrase_config.pet_phrases  # 已过滤空字符串的关键词列表
+        match_type = pet_phrase_config.match_type  # contains/exact
+
+        # 1. 生成每个关键词的 CASE WHEN 片段 + 对应参数
+        case_fragments = []
+        case_params = []
+        for phrase in phrases:
+            if match_type == "exact":
+                # 精确匹配：直接判断等于关键词（参数化）
+                fragment = "COALESCE(CASE WHEN message_content = ? THEN ? || ',' ELSE '' END, '')"
+                case_params.extend([phrase, phrase])
+            else:
+                # 模糊匹配：INSTR 判断是否包含关键词（参数化，避免注入）
+                fragment = "COALESCE(CASE WHEN INSTR(message_content, ?) > 0 THEN ? || ',' ELSE '' END, '')"
+                # 参数1：用于 INSTR 判断的关键词；参数2：用于拼接的关键词（保持一致）
+                case_params.extend([phrase, phrase])
+
+            case_fragments.append(fragment)
+
+        # 2. 拼接所有 CASE WHEN 片段 + TRIM 去除最后一个逗号
+        case_join_str = " || ".join(case_fragments)
+        match_keywords_sql = f"TRIM({case_join_str}, ',') AS matched_phrases"
+
+        return match_keywords_sql, tuple(case_params)

@@ -2,14 +2,15 @@ import logging
 from typing import Optional, List, Dict, Any
 
 from exceptions import DBPreloadFailedError
-from services.base.lucky_base_db_service_sync import LuckyDBBaseServiceSync
+from ..base.lucky_base_db_service_sync import LuckyDBBaseServiceSync
 
 logger = logging.getLogger(__name__)
 
 class ContactDBService(LuckyDBBaseServiceSync):
     """联系人数据库服务"""
 
-    def get_contacts(self,
+    @classmethod
+    def get_contacts(cls,
                      target_values: Optional[List[str]] = None,
                      filter_group_chat: bool = False) -> List[Dict[str, Any]]:
         """
@@ -39,9 +40,11 @@ class ContactDBService(LuckyDBBaseServiceSync):
             params = tuple(target_values) * 2
 
         # 3. 执行查询（同步版，异步版加await）
-        return self.execute_query(base_sql, params)
+        return cls.execute_query(base_sql, params)
 
-    def _test_db_connection(self) -> None:
+
+    @classmethod
+    def test_db_connection(cls) -> bool:
         """实现抽象方法：测试数据库连接，统计contact表中好友/群聊数量"""
         try:
             # 1. 构造统计SQL：按local_type分组计数
@@ -51,7 +54,7 @@ class ContactDBService(LuckyDBBaseServiceSync):
                        GROUP BY local_type \
                        """
             # 2. 执行同步查询
-            result = self.execute_query(test_sql)
+            result = cls.execute_query(test_sql)
 
             # 3. 初始化统计结果
             friend_count = 0  # local_type=1 好友
@@ -67,10 +70,12 @@ class ContactDBService(LuckyDBBaseServiceSync):
                     group_count = count
 
             # 5. 日志输出统计结果
-            logger.info(
+            logger.debug(
                 "✅ 联系人数据库连接测试通过：好友数=%d，群聊数=%d",
                 friend_count, group_count
             )
+
+            return len(result) > 0
 
         except Exception as e:
             # 6. 连接/查询失败时抛出异常，终止初始化

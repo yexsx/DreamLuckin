@@ -19,6 +19,13 @@ class DBConnectionNotInitializedError(LuckyChatDBError):
     def __init__(self, message: str = "❌ 数据库连接未初始化"):
         super().__init__(message)
 
+class DBPoolExhaustedError(LuckyChatDBError):
+    """数据库连接未初始化异常（连接对象为空）"""
+    def __init__(self, max_connections:int, message: str = "❌ 连接池已耗尽"):
+        self.max_connections = max_connections
+        full_message = f"{message} (最大连接数: {max_connections})"
+        super().__init__(full_message)
+
 class SQLQueryFailedError(LuckyChatDBError):
     """SQL查询执行失败异常"""
     def __init__(self, sql: str, params: tuple, message: str = "❌ SQL 查询失败"):

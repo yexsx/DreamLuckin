@@ -7,7 +7,8 @@ from .db_exceptions import (
     DBServiceNotPreloadedError,
     DBPreloadFailedError,
     DBConnectionNotInitializedError,
-    SQLQueryFailedError
+    SQLQueryFailedError,
+    DBPoolExhaustedError
 )
 
 # 解析异常
@@ -21,8 +22,8 @@ from .parse_exceptions import (
 )
 
 # 业务异常
-from .stat_exception import (
-    StatBaseException,
+from .analyzer_exception import (
+    AnalyzerBaseException,
     ContactNotFoundError,
     TargetTableNotFoundError
 )
@@ -34,7 +35,8 @@ DB_EXCEPTIONS = (
     DBServiceNotPreloadedError,
     DBPreloadFailedError,
     DBConnectionNotInitializedError,
-    SQLQueryFailedError
+    SQLQueryFailedError,
+    DBPoolExhaustedError
 )
 
 # 解析异常分组（仅包含解析相关）
@@ -49,7 +51,7 @@ PARSE_EXCEPTIONS = (
 
 # 业务异常分组
 STAT_BASE_EXCEPTIONS = (
-    StatBaseException,
+    AnalyzerBaseException,
     TargetTableNotFoundError,
     ContactNotFoundError
 )

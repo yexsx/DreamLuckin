@@ -3,7 +3,9 @@
   "db_config": {
     "contact_db_path": "D:\\programmer\\soul\\DreamLuckin\\configs\\contact_decrypted.db",
     "chat_db_path": "D:\\programmer\\soul\\DreamLuckin\\configs\\message_0_decrypted.db",
-    "max_concurrency": 10
+    "max_concurrency": 10,
+    "pool_min_connections": 8,
+    "pool_max_connections": 20
   },
   "stat_mode": {
     "mode_type": "self_to_target",
@@ -17,8 +19,9 @@
     "custom_end_date": "2025-12-11"
   },
   "pet_phrase_config": {
-    "pet_phrases": ["好的", "okk"],
-    "match_type": "contains"
+    "pet_phrases": ["好的", "rs4", "通行证"],
+    "match_type": "contains",
+    "context_backtrack_limit": 3
   },
   "filter_config": {
     "filter_group_chat": false
