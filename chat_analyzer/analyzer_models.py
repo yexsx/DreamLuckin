@@ -13,15 +13,12 @@ class ContactType(Enum):
     UNKNOWN = (-1, "unknown")       # 未知类型（兜底）
 
     @classmethod
-    def get_type_by_local_type_id(cls, local_type: int) -> "ContactType":
+    def get_type_by_local_type_id(cls, local_type: int) -> str:
         """根据local_type获取对应的类型字符串（适配原有逻辑）"""
         for member in cls:
             if member.value[0] == local_type:
-                return member
-        return cls.UNKNOWN  # 兜底返回unknown
-
-    def __repr__(self):
-        return self.value[1]
+                return member.value[1]
+        return cls.UNKNOWN.value[1]  # 兜底返回unknown
 
 
 @dataclass
@@ -29,8 +26,8 @@ class ContactRecord:
     """映射缓存的单个联系人/群聊缓存对象（替代原嵌套字典）"""
     username: str          # 联系人username
     nickname: str          # 联系人昵称（remark/nick_name）
-    type: ContactType      # 类型：friend/group/group_friend/unknown（原type字段，避免关键字冲突）
-    # type_code: int         # 原始local_type值（1/2/3）
+    type: str      # 类型：friend/group/group_friend/unknown（原type字段，避免关键字冲突）
+    type_code: int         # 原始local_type值（1/2/3）
 
 
 
@@ -42,7 +39,7 @@ class ChatRecordCore:
     message_content: str        # 纯文字聊天内容
     real_sender_id: int         # 发送者ID（1=自己，其他=好友/群友）
     create_time: int            # 时间戳
-    create_time_format: Optional[datetime] = None  # 格式化时间（可选，兼容空值）
+    # create_time_format: Optional[datetime] = None  # 格式化时间（可选，兼容空值）
 
 @dataclass
 class ChatRecordCommon(ChatRecordCore):

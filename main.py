@@ -18,7 +18,7 @@ from exceptions import ParseBaseError, LuckyChatDBError, AnalyzerBaseException
 # # 策略工厂 + 接口
 from chat_analyzer import ChatRecordAnalyzer
 # 导入配置加载门面类
-from utils import ConfigLoader
+from io_put import ConfigLoader
 
 # ====================== 3. 核心异步主函数 ======================
 async def main():
@@ -117,8 +117,7 @@ if __name__ == "__main__":
 # √ 15.完成群聊wxid翻译
 # √ 16.重构table_chat_records结构,local_id为key的字典
 # √ 17.聊天记录数据库已改成对象池模式
-# o 18.结果分析转换成json
+# √ 18.结果分析转换成json
 # o 19.对象池导致的程序终止需要两次
-# o 20.对象输出方法简化封装好
-# o 21.整理utils文件夹
-
+# √ 20.对象输出方法简化封装好
+# √ 21.整理utils文件夹

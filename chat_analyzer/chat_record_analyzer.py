@@ -1,14 +1,13 @@
 import dataclasses
-import datetime
 import hashlib
 import logging
+import os
 import re
-from typing import Dict, List, Any
-
+from typing import Dict, List
+from datetime import datetime
 from exceptions import ContactNotFoundError, TargetTableNotFoundError
 from parser import AppConfig
-from services import ContactDBService, ChatRecordDBService
-from utils import SQLBuilder,ConfigLoader
+from services import ContactDBService, ChatRecordDBService, SQLBuilder
 from .analyzer_models import (
     ContactType,
     ContactRecord,
@@ -18,6 +17,7 @@ from .analyzer_models import (
     ProcessResultType,
     BacktrackedRecordType, AnalyzerResult, ChatRecordExtend
 )
+from io_put import DataConverterFacade
 
 logger = logging.getLogger(__name__)
 
@@ -54,11 +54,10 @@ class ChatRecordAnalyzer:
         self.analyzer_result = self._aggregate_analyzer_results()
         # 步骤6：翻译wxid群聊名称
         self._replace_wxid_with_nickname()
+        # 步骤7: JSON格式输出分析结果
+        self._save_analyzer_result_to_json()
         # 步骤7：聚合统计
         # return self._aggregate_stat()
-
-        ConfigLoader.save_to_json(self.analyzer_result,self.app_config.output_config.export_path+'result.json')
-        pass
 
 
 
@@ -111,8 +110,8 @@ class ChatRecordAnalyzer:
             associate_mapping[target_table_name] = ContactRecord(
                 username=username,
                 nickname=contact_name,
-                type=contact_type
-                # type_code=contact_info["local_type"]  # 对应原字典的type_code
+                type=contact_type,
+                type_code=local_type
             )
 
             logger.info(
@@ -247,7 +246,7 @@ class ChatRecordAnalyzer:
                     message_content=raw["message_content"],
                     real_sender_id=raw["real_sender_id"],
                     create_time=raw_create_time,
-                    create_time_format=datetime.datetime.fromtimestamp(raw_create_time) if raw_create_time else None,
+                    # create_time_format=datetime.datetime.fromtimestamp(raw_create_time) if raw_create_time else None,
                     matched_phrases=raw_matched_phrases.split(',') if raw_matched_phrases and raw_matched_phrases.strip() else []
                 )
                 chat_records[chat_record.local_id] = chat_record  # 以local_id为key存入字典
@@ -370,8 +369,7 @@ class ChatRecordAnalyzer:
                 message_content=raw["message_content"],
                 real_sender_id=raw["real_sender_id"],
                 create_time=raw["create_time"],
-                create_time_format=datetime.datetime.fromtimestamp(raw["create_time"]) if raw["create_time"]
-                else None
+                # create_time_format=datetime.datetime.fromtimestamp(raw["create_time"]) if raw["create_time"] else None
             )
             for raw in raw_records
         ]
@@ -503,7 +501,7 @@ class ChatRecordAnalyzer:
 
         # 检查是否存在群组类型的联系人
         has_group = any(
-            contact.type == ContactType.GROUP
+            contact.type == ContactType.GROUP.value[1]
             for contact in self.mapping_cache.values()
         )
         if not has_group:
@@ -513,7 +511,7 @@ class ChatRecordAnalyzer:
         # 步骤2: 获取联系人信息并建立映射字典
         # 假设target_value为None时获取所有联系人，实际使用时请根据需求调整
         contact_result = ContactDBService.get_contacts(None, False)
-        logger.info(f"🥁 获取到{len(contact_result)}条联系人信息用于wxid映射")
+        logger.info(f"🥁 获取到[{len(contact_result)}]条联系人信息用于wxid映射")
 
         # 构建username到nickname的映射: 优先使用remark，否则使用nick_name
         username_to_nickname: Dict[str, str] = {}
@@ -541,7 +539,7 @@ class ChatRecordAnalyzer:
                 for last_record in chat_record.context_last_records:
                     self._replace_wxid_content(last_record, username_to_nickname)
 
-        logger.info("🥁 翻译群聊成员昵称操作完成")
+        logger.info("🥁 翻译群聊成员昵称任务完成")
 
 
     @staticmethod
@@ -571,8 +569,30 @@ class ChatRecordAnalyzer:
     #endregion
 
 
+    def _save_analyzer_result_to_json(self):
+        """步骤7：JSON格式输出分析结果"""
+        pet_phrases = self.app_config.pet_phrase_config.pet_phrases
+        export_path = self.app_config.output_config.export_path
+
+        # 处理pet_phrases：取前3个关键词（避免过长），用下划线拼接
+        # 若为空则用"no_phrases"标识
+        phrase_suffix = "_".join(pet_phrases[:3]) if pet_phrases else "no_phrases"
+        # 替换可能影响文件名的特殊字符
+        phrase_suffix = phrase_suffix.replace(" ", "_").replace("/", "_").replace("\\", "_")
+
+        # 获取当前时间并格式化（年-月-日_时-分-秒）
+        current_time = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+
+        # 拼接文件名（格式：导出路径/时间_关键词组合.json）
+        filename = f"{current_time}_{phrase_suffix}.json"
+        # 组合完整文件路径
+        full_path = os.path.join(export_path, filename)
+
+        DataConverterFacade.save_json(self.analyzer_result, full_path)
+
+
     def _aggregate_stat(self) -> None:
-        """步骤6：按维度聚合统计
+        """步骤8：按维度聚合统计
         返回：
             StrategyResult：聚合后的统计结果（含维度概览、明细等）
         """
