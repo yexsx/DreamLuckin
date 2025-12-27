@@ -134,18 +134,38 @@ class LuckyDBPoolServiceAsync(metaclass=ABCMeta):
                 await cls._pool.put(new_conn)
 
     @classmethod
+    def is_pool_initialized(cls) -> bool:
+        """检查连接池是否已初始化"""
+        return cls._is_initialized
+
+    @classmethod
     async def close_pool(cls) -> None:
         """关闭连接池所有连接"""
         if not cls._is_initialized or not cls._pool:
             return
 
-        while not cls._pool.empty():
-            conn = await cls._pool.get()
-            await conn.close()
-
-        cls._pool = None
+        # 标记连接池正在关闭，防止新的连接获取
         cls._is_initialized = False
-        logger.info("✅ 数据库连接池已关闭")
+
+        # 关闭池中的所有连接
+        closed_count = 0
+        while True:
+            try:
+                # 使用 get_nowait 避免阻塞，如果队列为空会抛出 QueueEmpty 异常
+                conn = cls._pool.get_nowait()
+                try:
+                    # 关闭连接，aiosqlite 会自动等待所有操作完成
+                    await conn.close()
+                    closed_count += 1
+                except Exception as e:
+                    logger.warning(f"关闭连接时出错: {e}")
+            except asyncio.QueueEmpty:
+                # 队列已空，退出循环
+                break
+
+        # 清空连接池引用
+        cls._pool = None
+        logger.info(f"✅ 数据库连接池已关闭（共关闭 {closed_count} 个连接）")
 
     @classmethod
     @asynccontextmanager

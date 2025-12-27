@@ -28,12 +28,12 @@ class ConfigLoader:
         target_path = Path(config_path) if config_path else cls.DEFAULT_CONFIG_PATH
         # 标准化路径（自动处理Windows反斜杠/相对路径）
         target_path = target_path.resolve()
-        logger.info(f"开始加载配置文件，目标路径：{target_path}")
+        logger.info(f"✅ 开始加载配置文件，目标路径：{target_path}")
 
         try:
             # 2. 检查文件是否存在
             if not target_path.exists():
-                raise FileNotFoundError(f"配置文件不存在：{target_path}")
+                raise FileNotFoundError(f"⚠️ 配置文件不存在：{target_path}")
 
             # 3. 读取并解析JSON
             with open(target_path, "r", encoding="utf-8") as f:
@@ -43,13 +43,13 @@ class ConfigLoader:
             return config_dict
 
         except FileNotFoundError as e:
-            raise ParseBaseError(f"配置文件加载失败：文件不存在 → {e}") from e
+            raise ParseBaseError(f"⚠️ 配置文件加载失败：文件不存在 → {e}") from e
         except json.JSONDecodeError as e:
-            raise ParseBaseError(f"配置文件加载失败：JSON格式错误 → {e}") from e
+            raise ParseBaseError(f"⚠️ 配置文件加载失败：JSON格式错误 → {e}") from e
         except PermissionError as e:
-            raise ParseBaseError(f"配置文件加载失败：无读取权限 → {e}") from e
+            raise ParseBaseError(f"⚠️ 配置文件加载失败：无读取权限 → {e}") from e
         except Exception as e:
-            raise ParseBaseError(f"配置文件加载失败：未知异常 → {e}") from e
+            raise ParseBaseError(f"⚠️ 配置文件加载失败：未知异常 → {e}") from e
 
     @classmethod
     def get_default_config_path(cls) -> str:

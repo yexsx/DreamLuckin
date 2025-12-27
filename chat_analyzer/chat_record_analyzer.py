@@ -1,10 +1,10 @@
+import asyncio
 import dataclasses
 import hashlib
 import logging
-import os
 import re
 from typing import Dict, List
-from datetime import datetime
+
 from exceptions import ContactNotFoundError, TargetTableNotFoundError
 from parser import AppConfig
 from services import ContactDBService, ChatRecordDBService, SQLBuilder
@@ -17,7 +17,6 @@ from .analyzer_models import (
     ProcessResultType,
     BacktrackedRecordType, AnalyzerResult, ChatRecordExtend
 )
-from io_put import DataConverterFacade
 
 logger = logging.getLogger(__name__)
 
@@ -39,8 +38,7 @@ class ChatRecordAnalyzer:
         self.analyzer_result: List[AnalyzerResult] = []
 
 
-    # async def run(self) -> AnalyzerResult:
-    async def run(self) -> None:
+    async def run(self) -> List[AnalyzerResult]:
         """策略执行入口（统一串联所有步骤，无需重写）"""
         # 步骤1：获取映射关系
         self.mapping_cache = self._associate_mapping()
@@ -54,10 +52,8 @@ class ChatRecordAnalyzer:
         self.analyzer_result = self._aggregate_analyzer_results()
         # 步骤6：翻译wxid群聊名称
         self._replace_wxid_with_nickname()
-        # 步骤7: JSON格式输出分析结果
-        self._save_analyzer_result_to_json()
-        # 步骤7：聚合统计
-        # return self._aggregate_stat()
+
+        return self.analyzer_result
 
 
 
@@ -196,7 +192,7 @@ class ChatRecordAnalyzer:
 
     async def _process_tables(self, pending_tables: List[str]) -> ProcessResultType:
         """
-            步骤3：处理表数据（协程）
+            步骤3：处理表数据（协程，支持并发）
             参数：
                 pending_tables：_get_pending_tables返回的待处理表列表
             返回：
@@ -205,7 +201,7 @@ class ChatRecordAnalyzer:
 
         table_chat_records: ProcessResultType = {}
         pet_phrase_config = self.app_config.pet_phrase_config
-        # max_concurrency = self.app_config.db_config.max_concurrency
+        max_concurrency = self.app_config.db_config.max_concurrency
 
         # 1. 构建时间条件（所有表共用）
         time_condition = SQLBuilder.build_time_condition(self.app_config.time_config)
@@ -218,43 +214,53 @@ class ChatRecordAnalyzer:
             f"🎹 构建公共查询条件：待处理表数={len(pending_tables)} | "
             f"口头禅列表={pet_phrase_config.pet_phrases}（匹配类型={pet_phrase_config.match_type}） | "
             f"时间范围={time_condition} | "
-            f"仅查自己消息={True}"
+            f"仅查自己消息={True} | "
+            f"最大并发数={max_concurrency}"
         )
 
-        for table_name in pending_tables:
-            # 1. 调用DB服务获取原始记录（字典列表）
-            raw_records = await ChatRecordDBService.get_chat_records_by_phrase_and_time(
-                table_name=table_name,
-                phrase_condition=phrase_condition,
-                phrase_params=phrase_params,
-                match_keywords_sql=match_keywords_sql,
-                match_params=match_params,
-                time_condition=time_condition,
-                only_self_msg=self.app_config.stat_mode.mode_type != "target_to_self"
-            )
+        # 创建信号量限制并发数
+        semaphore = asyncio.Semaphore(max_concurrency)
 
-            # 2. 转换为ChatRecord对象（核心：字典→结构化类，改为local_id为key的dict）
-            chat_records = {}  # 初始化改为字典，替代列表
-            for raw in raw_records:
-                # 匹配ChatRecord字段，补充matched_phrases（空列表兜底）
-
-                raw_create_time = raw["create_time"]
-                raw_matched_phrases = raw["matched_phrases"]
-
-                chat_record = ChatRecordCommon(
-                    local_id=raw["local_id"],
-                    message_content=raw["message_content"],
-                    real_sender_id=raw["real_sender_id"],
-                    create_time=raw_create_time,
-                    # create_time_format=datetime.datetime.fromtimestamp(raw_create_time) if raw_create_time else None,
-                    matched_phrases=raw_matched_phrases.split(',') if raw_matched_phrases and raw_matched_phrases.strip() else []
+        async def process_single_table(tbl_name: str) -> tuple[str, Dict[int, ChatRecordCommon]]:
+            """处理单个表的协程函数"""
+            async with semaphore:
+                # 1. 调用DB服务获取原始记录（字典列表）
+                raw_records = await ChatRecordDBService.get_chat_records_by_phrase_and_time(
+                    table_name=tbl_name,
+                    phrase_condition=phrase_condition,
+                    phrase_params=phrase_params,
+                    match_keywords_sql=match_keywords_sql,
+                    match_params=match_params,
+                    time_condition=time_condition,
+                    only_self_msg=self.app_config.stat_mode.mode_type != "target_to_self"
                 )
-                chat_records[chat_record.local_id] = chat_record  # 以local_id为key存入字典
 
-            # 3. 存入结果字典
+                # 2. 转换为ChatRecord对象（核心：字典→结构化类，改为local_id为key的dict）
+                records_dict = {}  # 初始化改为字典，替代列表
+                for raw in raw_records:
+                    # 匹配ChatRecord字段，补充matched_phrases（空列表兜底）
+                    raw_create_time = raw["create_time"]
+                    raw_matched_phrases = raw["matched_phrases"]
+
+                    chat_record = ChatRecordCommon(
+                        local_id=raw["local_id"],
+                        message_content=raw["message_content"],
+                        real_sender_id=raw["real_sender_id"],
+                        create_time=raw_create_time,
+                        matched_phrases=raw_matched_phrases.split(',') if raw_matched_phrases and raw_matched_phrases.strip() else []
+                    )
+                    records_dict[chat_record.local_id] = chat_record  # 以local_id为key存入字典
+
+                logger.info(f"🎹 处理表完成：表名={tbl_name} | 有效记录数={len(records_dict.keys())}")
+                return tbl_name, records_dict
+
+        # 并发处理所有表
+        tasks = [process_single_table(table_name) for table_name in pending_tables]
+        results = await asyncio.gather(*tasks)
+
+        # 将结果存入字典
+        for table_name, chat_records in results:
             table_chat_records[table_name] = chat_records
-
-            logger.info(f"🎹 处理表完成：表名={table_name} | 有效记录数={len(chat_records.keys())}")
 
         return table_chat_records
 
@@ -283,31 +289,55 @@ class ChatRecordAnalyzer:
         backtrack_front_result: BacktrackedRecordType = {}
         backtrack_last_result: BacktrackedRecordType = {}
 
-        # ========== 核心步骤：按表→核心ID维度，分别处理前/后上下文 ==========
-        for table_name in self.process_result.keys():
-            # 初始化当前表的前/后结果
-            table_front: Dict[int, List[ChatRecordCore]] = {}
-            table_last: Dict[int, List[ChatRecordCore]] = {}
+        # ========== 核心步骤：按表→核心ID维度，分别处理前/后上下文（并发优化） ==========
+        max_concurrency = self.app_config.db_config.max_concurrency
+        semaphore = asyncio.Semaphore(max_concurrency)
 
+        async def process_context_for_core_id(
+            tbl_name: str,
+            core_id: int,
+            front_id_list: List[int],
+            last_id_list: List[int]
+        ) -> tuple[str, int, List[ChatRecordCore], List[ChatRecordCore]]:
+            """处理单个核心ID的前后上下文"""
+            async with semaphore:
+                front_ctx = await self._get_and_convert_context_records(tbl_name, front_id_list)
+                last_ctx = await self._get_and_convert_context_records(tbl_name, last_id_list)
+                return tbl_name, core_id, front_ctx, last_ctx
+
+        # 收集所有需要处理的上下文查询任务
+        context_tasks = []
+        for table_name in self.process_result.keys():
             # 获取当前表的前/后上下文ID映射
             table_front_id_map = backtrack_front_id_map.get(table_name, {})
             table_last_id_map = backtrack_last_id_map.get(table_name, {})
 
-            # 遍历当前表的每个核心ID
+            # 为当前表的每个核心ID创建任务
             for core_local_id in self.process_result[table_name].keys():
-                # -------------------- 处理前向上下文（调用私有方法） --------------------
                 front_ids = table_front_id_map.get(core_local_id, [])
-                front_context = await self._get_and_convert_context_records(table_name, front_ids)
-                table_front[core_local_id] = front_context
-
-                # -------------------- 处理后向上下文（调用私有方法） --------------------
                 last_ids = table_last_id_map.get(core_local_id, [])
-                last_context = await self._get_and_convert_context_records(table_name, last_ids)
-                table_last[core_local_id] = last_context
+                context_tasks.append(
+                    process_context_for_core_id(table_name, core_local_id, front_ids, last_ids)
+                )
 
-            # 存入当前表的前/后结果
-            backtrack_front_result[table_name] = table_front
-            backtrack_last_result[table_name] = table_last
+        # 并发执行所有上下文查询
+        if context_tasks:
+            context_results = await asyncio.gather(*context_tasks)
+
+            # 初始化所有表的结果字典
+            for table_name in self.process_result.keys():
+                backtrack_front_result[table_name] = {}
+                backtrack_last_result[table_name] = {}
+
+            # 将结果存入对应的表结构
+            for table_name, core_local_id, front_context, last_context in context_results:
+                backtrack_front_result[table_name][core_local_id] = front_context
+                backtrack_last_result[table_name][core_local_id] = last_context
+        else:
+            # 如果没有任务，初始化空结果
+            for table_name in self.process_result.keys():
+                backtrack_front_result[table_name] = {}
+                backtrack_last_result[table_name] = {}
 
         # ========== 新增日志：统计回溯结果并输出 ==========
         # 4. 输出各表明细日志（可选，按需开启）
@@ -369,7 +399,6 @@ class ChatRecordAnalyzer:
                 message_content=raw["message_content"],
                 real_sender_id=raw["real_sender_id"],
                 create_time=raw["create_time"],
-                # create_time_format=datetime.datetime.fromtimestamp(raw["create_time"]) if raw["create_time"] else None
             )
             for raw in raw_records
         ]
@@ -484,7 +513,7 @@ class ChatRecordAnalyzer:
                 chat_records=list(contact_records.values())
             ))
 
-        logger.info(f"🪉 聚合完成，共生成{len(analyzer_results)}个分析结果对象，最终结果:\n{analyzer_results}")
+        logger.info(f"🪉 聚合完成，共生成{len(analyzer_results)}个分析结果对象")
 
         return analyzer_results
 
@@ -567,38 +596,4 @@ class ChatRecordAnalyzer:
         record.message_content = content.replace(original_prefix, f'{nickname}:', 1)
         logger.debug(f"🥁 wxid替换完成: {username} -> {nickname}")
     #endregion
-
-
-    def _save_analyzer_result_to_json(self):
-        """步骤7：JSON格式输出分析结果"""
-        pet_phrases = self.app_config.pet_phrase_config.pet_phrases
-        export_path = self.app_config.output_config.export_path
-
-        # 处理pet_phrases：取前3个关键词（避免过长），用下划线拼接
-        # 若为空则用"no_phrases"标识
-        phrase_suffix = "_".join(pet_phrases[:3]) if pet_phrases else "no_phrases"
-        # 替换可能影响文件名的特殊字符
-        phrase_suffix = phrase_suffix.replace(" ", "_").replace("/", "_").replace("\\", "_")
-
-        # 获取当前时间并格式化（年-月-日_时-分-秒）
-        current_time = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-
-        # 拼接文件名（格式：导出路径/时间_关键词组合.json）
-        filename = f"{current_time}_{phrase_suffix}.json"
-        # 组合完整文件路径
-        full_path = os.path.join(export_path, filename)
-
-        DataConverterFacade.save_json(self.analyzer_result, full_path)
-
-
-    def _aggregate_stat(self) -> None:
-        """步骤8：按维度聚合统计
-        返回：
-            StrategyResult：聚合后的统计结果（含维度概览、明细等）
-        """
-
-
-
-
-        pass
 
