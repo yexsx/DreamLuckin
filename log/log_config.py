@@ -12,9 +12,10 @@ def setup_global_logging():
     """
     # ========== 1. 检测并创建log文件夹 ==========
     log_dir = "./log_back"
+    folder_created = False
     if not os.path.exists(log_dir):
         os.makedirs(log_dir, exist_ok=True)
-        logging.info(f"✅ 日志文件夹不存在，已自动创建：{log_dir}")
+        folder_created = True
 
     # ========== 2. 生成带启动时间的日志文件名 ==========
     # 时间格式：年-月-日_时-分-秒（无特殊字符，避免路径错误）
@@ -34,11 +35,15 @@ def setup_global_logging():
             logging.StreamHandler(sys.stdout),  # 控制台输出
             logging.FileHandler(
                 log_filepath,
-                encoding="utf-8"  # 避免中文乱码
+                encoding="utf-8",  # 避免中文乱码
+                mode="w"  # 明确指定写入模式，覆盖已存在的文件
             )  # 按时间命名的文件输出
-        ]
+        ],
+        force=True  # 强制重新配置，避免重复配置导致的问题
     )
 
-    # 日志配置完成提示（可选）
+    # 日志配置完成提示（在配置完成后记录）
     logger = logging.getLogger(__name__)
+    if folder_created:
+        logger.info(f"✅ 日志文件夹不存在，已自动创建：{log_dir}")
     logger.info(f"📁 全局日志配置完成，日志文件路径：{log_filepath}")
