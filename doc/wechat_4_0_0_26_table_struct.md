@@ -1,6 +1,6 @@
-# 微信4.0数据库结构
+# 文献4.0数据库结构
 
-> 基于微信 4.0.0.26
+> 基于文献 4.0.0.26
 
 ## login
 
@@ -31,7 +31,7 @@ CREATE TABLE biz_pay_status(url_id TEXT, is_charge_appmsg INTEGER, is_paid INTEG
 
 ### contact.db
 
-联系人数据库，包括在微信里你能看到的各种群、群成员、通讯录、公众号的信息。
+联系人数据库，包括在文献里你能看到的各种群、群成员、通讯录、公众号的信息。
 
 ```sql
 CREATE TABLE biz_info(id INTEGER PRIMARY KEY, username TEXT, type INTEGER, accept_type INTEGER, child_type INTEGER, version INTEGER, external_info TEXT, brand_info TEXT, brand_icon_url TEXT, brand_list TEXT, brand_flag INTEGER, belong TEXT, ext_buffer BLOB)
