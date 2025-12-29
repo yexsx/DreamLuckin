@@ -34,11 +34,17 @@
 
 👉 **[数据库解密操作指南](./doc/decrypted.md)**
 
+**所需工具**：解密过程中需要的工具文件（`DbkeyHookUI`、`wechat-dump-rs.exe` 等）已存放在 `doc/static/` 文件夹中，可以直接使用。
+
 简单来说，你需要：
-1. 获取微信的全局密钥（通过 `DbkeyHookUI` 等工具）
+1. 获取微信的全局密钥（使用 `doc/static/` 中的 `DbkeyHookUI` 或 `app_key` 等工具）
 2. 定位并备份 `message_0.db` 和联系人数据库文件
-3. 使用 `wechat-dump-rs.exe` 解密数据库
+3. 使用 `doc/static/` 中的 `wechat-dump-rs.exe` 解密数据库
 4. 将解密后的数据库文件路径配置到 `configs/config.json` 中
+
+**数据库结构说明**：如果想了解微信数据库的详细结构，可以参考：
+
+👉 **[微信数据库结构文档](./doc/wechat_4_0_0_26_table_struct.md)**
 
 ### 第二步：配置程序
 
@@ -63,6 +69,16 @@ python main.py
 2. 初始化数据库连接
 3. 分析聊天记录
 4. 将结果保存到 `output/` 目录
+
+### 第四步：可视化结果（可选）
+
+分析完成后，程序会在 `output/` 目录生成 JSON 格式的结果文件。
+
+你可以将生成的 JSON 文件上传到在线可视化平台查看分析结果：
+
+🌐 **可视化网站**：https://dreamluckin-visualize.example.com
+
+（将 JSON 文件内容粘贴或上传到网站，即可看到精美的数据可视化图表）
 
 ## 📚 项目架构
 
